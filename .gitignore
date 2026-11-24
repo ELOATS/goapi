@@ -6,6 +6,14 @@ coverage.out
 deploy/k8s/base/secrets.env
 deploy/k8s/base/alertbridge-secrets.env
 
+# IDE 和系统文件：个人配置，不进仓库
+.idea/
+.vscode/
+*.iml
+*.swp
+.DS_Store
+Thumbs.db
+
 # 必须进仓库的文件。很多人的全局 gitignore（core.excludesFile）里有 *.env 或 go.sum，
 # 仓库里的规则优先级更高，这里显式取消忽略
 !deploy/k8s/base/config.env
