@@ -37,7 +37,15 @@ jobs:
       # setup-go 就只装 1.26.0，测试和漏洞扫描都跑在没有安全补丁的旧版本上。
       # 这里取 go.mod 的主次版本，装这个系列的最新补丁版本（和 Dockerfile 用的 golang:1.26 镜像一致）
       - id: gover
-        run: echo "go=$(awk '/^go /{print \$2; exit}' go.mod | cut -d. -f1,2).x" >> "$GITHUB_OUTPUT"
+        run: |
+          # 兼容 CRLF 换行、UTF-8 BOM 和行首空白；取不到版本时直接报错，不把空版本交给 setup-go
+          v=$(sed -e '1s/^\xEF\xBB\xBF//' -e 's/\r$//' go.mod | awk '\$1 == "go" { split(\$2, a, "."); print a[1] "." a[2]; exit }')
+          if ! echo "$v" | grep -Eq '^[0-9]+\.[0-9]+$'; then
+            echo "::error file=go.mod::没有从 go.mod 读到 go 版本（读到的是 '$v'）。go.mod 前几行（cat -A 显示不可见字符）："
+            head -n 5 go.mod | cat -A
+            exit 1
+          fi
+          echo "go=$v.x" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ steps.gover.outputs.go }}
@@ -52,8 +60,8 @@ jobs:
 
       - name: Dockerfile 的 Go 版本和 go.mod 一致
         run: |
-          mod=$(awk '/^go /{print \$2; exit}' go.mod | cut -d. -f1,2)
-          img=$(sed -n 's/^ARG GO_VERSION=//p' Dockerfile)
+          mod=$(sed -e '1s/^\xEF\xBB\xBF//' -e 's/\r$//' go.mod | awk '\$1 == "go" { split(\$2, a, "."); print a[1] "." a[2]; exit }')
+          img=$(sed -n 's/^ARG GO_VERSION=//p' Dockerfile | tr -d '\r[:space:]')
           if [ "$mod" != "$img" ]; then
             echo "::error file=Dockerfile::GO_VERSION=$img，但 go.mod 要求 go $mod，镜像构建会失败。请把 Dockerfile 的 GO_VERSION 改成 $mod"
             exit 1
@@ -118,7 +126,15 @@ jobs:
       # setup-go 就只装 1.26.0，测试和漏洞扫描都跑在没有安全补丁的旧版本上。
       # 这里取 go.mod 的主次版本，装这个系列的最新补丁版本（和 Dockerfile 用的 golang:1.26 镜像一致）
       - id: gover
-        run: echo "go=$(awk '/^go /{print \$2; exit}' go.mod | cut -d. -f1,2).x" >> "$GITHUB_OUTPUT"
+        run: |
+          # 兼容 CRLF 换行、UTF-8 BOM 和行首空白；取不到版本时直接报错，不把空版本交给 setup-go
+          v=$(sed -e '1s/^\xEF\xBB\xBF//' -e 's/\r$//' go.mod | awk '\$1 == "go" { split(\$2, a, "."); print a[1] "." a[2]; exit }')
+          if ! echo "$v" | grep -Eq '^[0-9]+\.[0-9]+$'; then
+            echo "::error file=go.mod::没有从 go.mod 读到 go 版本（读到的是 '$v'）。go.mod 前几行（cat -A 显示不可见字符）："
+            head -n 5 go.mod | cat -A
+            exit 1
+          fi
+          echo "go=$v.x" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ steps.gover.outputs.go }}
@@ -156,7 +172,15 @@ jobs:
       # setup-go 就只装 1.26.0，测试和漏洞扫描都跑在没有安全补丁的旧版本上。
       # 这里取 go.mod 的主次版本，装这个系列的最新补丁版本（和 Dockerfile 用的 golang:1.26 镜像一致）
       - id: gover
-        run: echo "go=$(awk '/^go /{print \$2; exit}' go.mod | cut -d. -f1,2).x" >> "$GITHUB_OUTPUT"
+        run: |
+          # 兼容 CRLF 换行、UTF-8 BOM 和行首空白；取不到版本时直接报错，不把空版本交给 setup-go
+          v=$(sed -e '1s/^\xEF\xBB\xBF//' -e 's/\r$//' go.mod | awk '\$1 == "go" { split(\$2, a, "."); print a[1] "." a[2]; exit }')
+          if ! echo "$v" | grep -Eq '^[0-9]+\.[0-9]+$'; then
+            echo "::error file=go.mod::没有从 go.mod 读到 go 版本（读到的是 '$v'）。go.mod 前几行（cat -A 显示不可见字符）："
+            head -n 5 go.mod | cat -A
+            exit 1
+          fi
+          echo "go=$v.x" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ steps.gover.outputs.go }}
