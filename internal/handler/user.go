@@ -11,8 +11,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"example.com/goapi/internal/domain"
-	"example.com/goapi/internal/httpx"
+	"ELOATS/goapi/internal/domain"
+	"ELOATS/goapi/internal/httpx"
 )
 
 // UserService 在使用方定义接口（Go 惯例），实现在 service 包。

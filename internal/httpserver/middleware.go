@@ -14,8 +14,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	"example.com/goapi/internal/httpx"
-	"example.com/goapi/internal/telemetry"
+	"ELOATS/goapi/internal/httpx"
+	"ELOATS/goapi/internal/telemetry"
 )
 
 // observe 记录 RED 指标，并把 span 重命名为 "GET /api/v1/users/{id}"。

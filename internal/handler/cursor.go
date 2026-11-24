@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"example.com/goapi/internal/domain"
+	"ELOATS/goapi/internal/domain"
 )
 
 // 游标格式：base64url(JSON) "." base64url(HMAC-SHA256 前 16 字节)。

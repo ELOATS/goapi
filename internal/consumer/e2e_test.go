@@ -12,7 +12,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
-	"example.com/goapi/internal/outbox"
+	"ELOATS/goapi/internal/outbox"
 )
 
 func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {

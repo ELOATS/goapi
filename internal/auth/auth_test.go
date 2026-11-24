@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"example.com/goapi/internal/auth"
-	"example.com/goapi/internal/auth/authtest"
-	"example.com/goapi/internal/domain"
+	"ELOATS/goapi/internal/auth"
+	"ELOATS/goapi/internal/auth/authtest"
+	"ELOATS/goapi/internal/domain"
 )
 
 var discard = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -33,10 +33,10 @@ func TestMiddleware(t *testing.T) {
 	past := time.Now().Add(-time.Hour).Unix()
 
 	cases := []struct {
-		name          string
-		header        string
-		want          int
-		wantInvalid   bool // WWW-Authenticate 是否带 error="invalid_token"
+		name        string
+		header      string
+		want        int
+		wantInvalid bool // WWW-Authenticate 是否带 error="invalid_token"
 	}{
 		{"missing header", "", 401, false},
 		{"basic scheme", "Basic dXNlcjpwYXNz", 401, false},

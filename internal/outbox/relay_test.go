@@ -16,8 +16,8 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
-	"example.com/goapi/internal/domain"
-	"example.com/goapi/internal/store"
+	"ELOATS/goapi/internal/domain"
+	"ELOATS/goapi/internal/store"
 )
 
 // 集成测试：设置 TEST_DATABASE_URL 才会运行，会清空 outbox_events 表，不要指向生产库。

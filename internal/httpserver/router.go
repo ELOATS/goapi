@@ -10,12 +10,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	apispec "example.com/goapi/api"
-	"example.com/goapi/internal/auth"
-	"example.com/goapi/internal/config"
-	"example.com/goapi/internal/handler"
-	"example.com/goapi/internal/httpx"
-	"example.com/goapi/internal/ratelimit"
+	apispec "ELOATS/goapi/api"
+	"ELOATS/goapi/internal/auth"
+	"ELOATS/goapi/internal/config"
+	"ELOATS/goapi/internal/handler"
+	"ELOATS/goapi/internal/httpx"
+	"ELOATS/goapi/internal/ratelimit"
 )
 
 // 角色名需要在身份提供方里创建，并分配给用户或客户端。

@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"example.com/goapi/internal/domain"
+	"ELOATS/goapi/internal/domain"
 )
 
 // 集成测试：设置 TEST_DATABASE_URL 才会运行，例如

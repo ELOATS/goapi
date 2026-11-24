@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"example.com/goapi/internal/domain"
+	"ELOATS/goapi/internal/domain"
 )
 
 type MemoryUserStore struct {

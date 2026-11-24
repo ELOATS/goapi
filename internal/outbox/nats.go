@@ -13,7 +13,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"go.opentelemetry.io/otel"
 
-	"example.com/goapi/internal/telemetry"
+	"ELOATS/goapi/internal/telemetry"
 )
 
 type NATSOptions struct {

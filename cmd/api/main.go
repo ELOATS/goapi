@@ -22,13 +22,13 @@ import (
 	"github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
 
-	"example.com/goapi/internal/auth"
-	"example.com/goapi/internal/config"
-	"example.com/goapi/internal/httpserver"
-	"example.com/goapi/internal/ratelimit"
-	"example.com/goapi/internal/service"
-	"example.com/goapi/internal/store"
-	"example.com/goapi/internal/telemetry"
+	"ELOATS/goapi/internal/auth"
+	"ELOATS/goapi/internal/config"
+	"ELOATS/goapi/internal/httpserver"
+	"ELOATS/goapi/internal/ratelimit"
+	"ELOATS/goapi/internal/service"
+	"ELOATS/goapi/internal/store"
+	"ELOATS/goapi/internal/telemetry"
 )
 
 func main() {

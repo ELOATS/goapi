@@ -9,11 +9,11 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
-	"example.com/goapi/internal/auth"
-	"example.com/goapi/internal/config"
-	"example.com/goapi/internal/handler"
-	"example.com/goapi/internal/ratelimit"
-	"example.com/goapi/internal/telemetry"
+	"ELOATS/goapi/internal/auth"
+	"ELOATS/goapi/internal/config"
+	"ELOATS/goapi/internal/handler"
+	"ELOATS/goapi/internal/ratelimit"
+	"ELOATS/goapi/internal/telemetry"
 )
 
 // Deps 是注入到路由层的依赖，方便测试时替换。
@@ -53,7 +53,7 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	return s
 }
 
-func (s *Server) ListenAndServe() error             { return s.srv.ListenAndServe() }
+func (s *Server) ListenAndServe() error              { return s.srv.ListenAndServe() }
 func (s *Server) Shutdown(ctx context.Context) error { return s.srv.Shutdown(ctx) }
 func (s *Server) SetNotReady()                       { s.ready.Store(false) }
 

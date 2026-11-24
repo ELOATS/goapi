@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/goapi/internal/auth"
+	"ELOATS/goapi/internal/auth"
 )
 
 const (

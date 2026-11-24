@@ -18,7 +18,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"example.com/goapi/internal/telemetry"
+	"ELOATS/goapi/internal/telemetry"
 )
 
 // DB 是处理器传给 Handler 的事务，pgx.Tx 满足它。
@@ -85,14 +85,14 @@ func (o *ProcessorOptions) setDefaults() {
 }
 
 type Processor struct {
-	pool     *pgxpool.Pool
-	name     string
-	handlers map[string]Handler
-	opt      ProcessorOptions
+	pool       *pgxpool.Pool
+	name       string
+	handlers   map[string]Handler
+	opt        ProcessorOptions
 	maxDeliver uint64 // 由 opt.MaxDeliver 换算
-	log      *slog.Logger
-	metrics  *Metrics
-	tracer   trace.Tracer
+	log        *slog.Logger
+	metrics    *Metrics
+	tracer     trace.Tracer
 }
 
 // NewProcessor：name 是消费者名，用于去重记录和死信；handlers 按事件类型注册。
@@ -102,14 +102,14 @@ func NewProcessor(pool *pgxpool.Pool, name string, handlers map[string]Handler, 
 		logger = slog.Default()
 	}
 	return &Processor{
-		pool:     pool,
-		name:     name,
-		handlers: handlers,
-		opt:      opt,
+		pool:       pool,
+		name:       name,
+		handlers:   handlers,
+		opt:        opt,
 		maxDeliver: uint64(opt.MaxDeliver), //nolint:gosec // setDefaults 保证 MaxDeliver >= 1
-		log:      logger.With("consumer", name),
-		metrics:  m,
-		tracer:   otel.Tracer("example.com/goapi/internal/consumer"),
+		log:        logger.With("consumer", name),
+		metrics:    m,
+		tracer:     otel.Tracer("example.com/goapi/internal/consumer"),
 	}
 }
 

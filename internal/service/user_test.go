@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"testing"
 
-	"example.com/goapi/internal/domain"
-	"example.com/goapi/internal/store"
+	"ELOATS/goapi/internal/domain"
+	"ELOATS/goapi/internal/store"
 )
 
 type failingEvents struct{}

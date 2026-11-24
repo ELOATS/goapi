@@ -17,9 +17,9 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"example.com/goapi/internal/outbox"
-	"example.com/goapi/internal/store"
-	"example.com/goapi/internal/telemetry"
+	"ELOATS/goapi/internal/outbox"
+	"ELOATS/goapi/internal/store"
+	"ELOATS/goapi/internal/telemetry"
 )
 
 type config struct {

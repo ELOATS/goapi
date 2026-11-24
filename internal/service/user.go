@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"example.com/goapi/internal/domain"
+	"ELOATS/goapi/internal/domain"
 )
 
 type UserRepo interface {

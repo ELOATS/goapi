@@ -12,14 +12,14 @@ import (
 	"testing"
 	"time"
 
-	"example.com/goapi/internal/auth"
-	"example.com/goapi/internal/auth/authtest"
-	"example.com/goapi/internal/config"
-	"example.com/goapi/internal/domain"
-	"example.com/goapi/internal/ratelimit"
-	"example.com/goapi/internal/service"
-	"example.com/goapi/internal/store"
-	"example.com/goapi/internal/telemetry"
+	"ELOATS/goapi/internal/auth"
+	"ELOATS/goapi/internal/auth/authtest"
+	"ELOATS/goapi/internal/config"
+	"ELOATS/goapi/internal/domain"
+	"ELOATS/goapi/internal/ratelimit"
+	"ELOATS/goapi/internal/service"
+	"ELOATS/goapi/internal/store"
+	"ELOATS/goapi/internal/telemetry"
 
 	"github.com/prometheus/client_golang/prometheus"
 )

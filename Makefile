@@ -86,7 +86,7 @@ k8s-render:
 # 第 1 步：只应用 pre-deploy 资源并等迁移完成（失败则停止，Deployment 不会被更新）
 k8s-migrate:
 	kubectl -n $(K8S_NS) delete job goapi-migrate --ignore-not-found
-	kubectl apply -k $(K8S_OVERLAY) -l goapi.example.com/phase=pre-deploy
+	kubectl apply -k $(K8S_OVERLAY) -l goapi.ELOATS/phase=pre-deploy
 	kubectl -n $(K8S_NS) wait --for=condition=complete job/goapi-migrate --timeout=10m
 
 # 第 2 步：应用全部资源并等待滚动完成

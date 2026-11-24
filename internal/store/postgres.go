@@ -16,7 +16,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 
-	"example.com/goapi/internal/domain"
+	"ELOATS/goapi/internal/domain"
 )
 
 //go:embed migrations/*.sql

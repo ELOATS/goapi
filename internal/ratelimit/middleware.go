@@ -13,7 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
-	"example.com/goapi/internal/httpx"
+	"ELOATS/goapi/internal/httpx"
 )
 
 // KeyFunc 返回限流的键；ok 为 false 表示这个请求不受该规则约束。

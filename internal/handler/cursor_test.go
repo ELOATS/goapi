@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/goapi/internal/domain"
+	"ELOATS/goapi/internal/domain"
 )
 
 func testKey(b byte) []byte { return bytes.Repeat([]byte{b}, MinCursorKeyLen) }

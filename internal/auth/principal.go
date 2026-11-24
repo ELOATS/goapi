@@ -5,7 +5,7 @@ import (
 	"context"
 	"slices"
 
-	"example.com/goapi/internal/domain"
+	"ELOATS/goapi/internal/domain"
 )
 
 // Principal 是通过认证的调用方。

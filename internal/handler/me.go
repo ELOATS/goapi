@@ -3,8 +3,8 @@ package handler
 import (
 	"net/http"
 
-	"example.com/goapi/internal/auth"
-	"example.com/goapi/internal/httpx"
+	"ELOATS/goapi/internal/auth"
+	"ELOATS/goapi/internal/httpx"
 )
 
 // Me 返回当前调用方的身份和角色，方便排查"为什么是 403"。

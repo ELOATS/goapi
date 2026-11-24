@@ -19,13 +19,13 @@ import (
 	"github.com/getkin/kin-openapi/routers/gorillamux"
 	"github.com/go-chi/chi/v5"
 
-	apispec "example.com/goapi/api"
-	"example.com/goapi/internal/auth"
-	"example.com/goapi/internal/auth/authtest"
-	"example.com/goapi/internal/config"
-	"example.com/goapi/internal/ratelimit"
-	"example.com/goapi/internal/service"
-	"example.com/goapi/internal/store"
+	apispec "ELOATS/goapi/api"
+	"ELOATS/goapi/internal/auth"
+	"ELOATS/goapi/internal/auth/authtest"
+	"ELOATS/goapi/internal/config"
+	"ELOATS/goapi/internal/ratelimit"
+	"ELOATS/goapi/internal/service"
+	"ELOATS/goapi/internal/store"
 )
 
 // 文档自身的路由，不写进 openapi.yaml
@@ -117,8 +117,8 @@ func TestOpenAPIContract(t *testing.T) {
 
 	cases := []struct {
 		name, method, path, token, body, contentType string
-		want                                          int
-		invalidRequest                                bool // 故意发不符合规范的请求，只校验响应
+		want                                         int
+		invalidRequest                               bool // 故意发不符合规范的请求，只校验响应
 	}{
 		{name: "healthz", method: "GET", path: "/healthz", want: 200},
 		{name: "readyz", method: "GET", path: "/readyz", want: 200},

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"example.com/goapi/internal/httpx"
+	"ELOATS/goapi/internal/httpx"
 )
 
 const realm = "goapi"
