@@ -283,7 +283,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # GHCR 的镜像路径必须全小写，github.repository 可能带大写（例如 ELOATS/goapi）
       - id: repo
