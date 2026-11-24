@@ -1,0 +1,114 @@
+# Alertmanager → 飞书 / 钉钉 转发服务。Alertmanager 里 webhook 地址写：
+#   http://goapi-alertbridge.goapi.svc:8080/feishu
+#   http://goapi-alertbridge.goapi.svc:8080/dingtalk
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: goapi-alertbridge
+  labels:
+    app.kubernetes.io/name: goapi-alertbridge
+    app.kubernetes.io/component: alerting
+spec:
+  replicas: 2   # 告警通道本身不能是单点
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: goapi-alertbridge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: goapi-alertbridge
+        app.kubernetes.io/component: alerting
+    spec:
+      serviceAccountName: goapi
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 15
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532      # distroless nonroot
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: goapi-alertbridge
+      containers:
+        - name: alertbridge
+          image: goapi-alertbridge
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: ALERT_TIMEZONE
+              value: Asia/Taipei
+          envFrom:
+            - secretRef:
+                name: alertbridge-secrets
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: goapi-alertbridge
+  labels:
+    app.kubernetes.io/name: goapi-alertbridge
+spec:
+  selector:
+    app.kubernetes.io/name: goapi-alertbridge
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: goapi-alertbridge
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: goapi-alertbridge
+---
+# 没有鉴权，只允许 Alertmanager 所在的 monitoring 命名空间访问
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: goapi-alertbridge
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: goapi-alertbridge
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 8080

@@ -1,0 +1,246 @@
+name: Deploy
+
+# 发布流程：
+#   push 到 main → CI 通过 → 自动部署 staging
+#   打 v* 标签   → CI 通过 → 部署 production（需要在 Environment 里审批）
+#   手动触发     → 部署指定 ref 到指定环境（也用于回滚到旧版本）
+# 两个环境部署的都是 CI 构建出的 sha-<7位提交> 镜像：生产跑的就是预发验证过的同一个镜像。
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 部署到哪个环境
+        type: choice
+        options: [staging, production]
+        required: true
+      ref:
+        description: 要部署的分支、标签或提交（回滚时填旧标签，例如 v1.2.2）
+        type: string
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan
+    # 只接受 CI 成功、且由 push 触发的运行：来自 fork 的 PR 绝不能触发部署
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      environment: ${{ steps.plan.outputs.environment }}
+      sha: ${{ steps.plan.outputs.sha }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          INPUT_ENV: ${{ inputs.environment }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            env_name="$INPUT_ENV"
+            sha=$(git rev-parse HEAD)
+          else
+            sha="$RUN_SHA"
+            case "$RUN_BRANCH" in
+              main) env_name=staging ;;
+              v*)   env_name=production ;;   # 标签触发时 head_branch 是标签名
+              *)    env_name="" ;;
+            esac
+          fi
+          tag="sha-${sha::7}"   # 与 CI 里 docker/metadata-action 的 type=sha 一致
+          echo "environment=$env_name" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "### 部署计划：${env_name:-（跳过）} ← $tag" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy to ${{ needs.plan.outputs.environment }}
+    needs: plan
+    if: needs.plan.outputs.environment != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # 在仓库 Settings → Environments 里给 production 配置 Required reviewers，这一步就会等人审批
+    environment:
+      name: ${{ needs.plan.outputs.environment }}
+      url: ${{ steps.smoke.outputs.url }}
+    # 同一环境串行部署，且不能中途取消（可能停在迁移中间）
+    concurrency:
+      group: deploy-${{ needs.plan.outputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read     # 检查镜像是否存在
+      # id-token: write  # 改用云厂商 OIDC 登录集群时打开，见下方注释
+    env:
+      ENVIRONMENT: ${{ needs.plan.outputs.environment }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      OVERLAY: deploy/k8s/overlays/${{ needs.plan.outputs.environment }}
+      K8S_NS: ${{ needs.plan.outputs.environment == 'production' && 'goapi' || 'goapi-staging' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+
+      - name: 确认镜像已构建
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          repo="${GITHUB_REPOSITORY,,}"   # GHCR 路径必须小写
+          echo "IMAGE_PREFIX=ghcr.io/$repo" >> "$GITHUB_ENV"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          for c in api alertbridge relay consumer; do
+            docker buildx imagetools inspect "ghcr.io/$repo/$c:$TAG" > /dev/null \
+              || { echo "::error::镜像 ghcr.io/$repo/$c:$TAG 不存在，CI 的 Docker job 是否成功？"; exit 1; }
+          done
+
+      # 方式一（默认）：Environment secret KUBECONFIG_B64 = base64 编码的 kubeconfig。
+      # 建议给它一个只能操作对应命名空间的 ServiceAccount，而不是集群管理员。
+      # 方式二：用云厂商 OIDC，无需长期凭据，例如 EKS：
+      #   - uses: aws-actions/configure-aws-credentials@v5
+      #     with: { role-to-assume: ${{ vars.AWS_DEPLOY_ROLE }}, aws-region: ap-northeast-1 }
+      #   - run: aws eks update-kubeconfig --name my-cluster
+      - name: 配置 kubectl
+        env:
+          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+        run: |
+          [ -n "$KUBECONFIG_B64" ] || { echo "::error::Environment $ENVIRONMENT 缺少 secret KUBECONFIG_B64"; exit 1; }
+          echo "$KUBECONFIG_B64" | base64 -d > "$RUNNER_TEMP/kubeconfig"
+          chmod 600 "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: 检查集群连通性
+        run: kubectl version && kubectl auth can-i create deployments -n "$K8S_NS"
+
+      - name: 写入密钥和镜像版本
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          CURSOR_SECRET: ${{ secrets.CURSOR_SECRET }}
+          CURSOR_SECRET_PREVIOUS: ${{ secrets.CURSOR_SECRET_PREVIOUS }}
+          NATS_URL: ${{ secrets.NATS_URL }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FEISHU_SECRET: ${{ secrets.FEISHU_SECRET }}
+          DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
+          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
+        run: |
+          [ -n "$DATABASE_URL" ] || { echo "::error::Environment $ENVIRONMENT 缺少 secret DATABASE_URL"; exit 1; }
+          [ -n "$CURSOR_SECRET" ] || { echo "::error::Environment $ENVIRONMENT 缺少 secret CURSOR_SECRET（openssl rand -base64 48 生成）"; exit 1; }
+          umask 077
+          {
+            printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
+            printf 'REDIS_URL=%s\n' "$REDIS_URL"
+            printf 'CURSOR_SECRET=%s\n' "$CURSOR_SECRET"
+            printf 'CURSOR_SECRET_PREVIOUS=%s\n' "$CURSOR_SECRET_PREVIOUS"
+            printf 'NATS_URL=%s\n' "$NATS_URL"
+          } > deploy/k8s/base/secrets.env
+          {
+            printf 'FEISHU_WEBHOOK_URL=%s\n' "$FEISHU_WEBHOOK_URL"
+            printf 'FEISHU_SECRET=%s\n' "$FEISHU_SECRET"
+            printf 'DINGTALK_WEBHOOK_URL=%s\n' "$DINGTALK_WEBHOOK_URL"
+            printf 'DINGTALK_SECRET=%s\n' "$DINGTALK_SECRET"
+          } > deploy/k8s/base/alertbridge-secrets.env
+
+          # 只改工作区里的 overlay，不提交回仓库（避免触发新的 CI 循环）
+          command -v kustomize >/dev/null || {
+            curl -fsSL https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh | bash
+            sudo mv kustomize /usr/local/bin/
+          }
+          cd "$OVERLAY"
+          kustomize edit set image \
+            "goapi-api=$IMAGE_PREFIX/api:$TAG" \
+            "goapi-alertbridge=$IMAGE_PREFIX/alertbridge:$TAG" \
+            "goapi-relay=$IMAGE_PREFIX/relay:$TAG" \
+            "goapi-consumer=$IMAGE_PREFIX/consumer:$TAG"
+
+      - name: 差异预览
+        run: kubectl diff -k "$OVERLAY" || true   # 有差异时退出码为 1，不算失败
+
+      - name: 数据库迁移
+        id: migrate
+        run: make k8s-migrate K8S_OVERLAY="$OVERLAY" K8S_NS="$K8S_NS"
+
+      - name: 打印迁移日志
+        if: always() && steps.migrate.outcome != 'skipped'
+        run: kubectl -n "$K8S_NS" logs job/goapi-migrate --tail=200 || true
+
+      - name: 滚动更新
+        id: rollout
+        run: |
+          make k8s-rollout K8S_OVERLAY="$OVERLAY" K8S_NS="$K8S_NS"
+          kubectl -n "$K8S_NS" annotate deployment/goapi-api --overwrite \
+            kubernetes.io/change-cause="$TAG by $GITHUB_ACTOR ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+
+      - name: 冒烟测试
+        id: smoke
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          kubectl -n "$K8S_NS" port-forward svc/goapi-api 18080:80 >/dev/null 2>&1 &
+          pf=$!
+          trap 'kill $pf 2>/dev/null' EXIT
+          for i in $(seq 1 15); do curl -fsS localhost:18080/readyz >/dev/null && break; sleep 2; done
+
+          curl -fsS localhost:18080/readyz
+          # 不带 token 必须返回 401，证明认证确实开启了
+          code=$(curl -s -o /dev/null -w '%{http_code}' "localhost:18080/api/v1/users?limit=1")
+          [ "$code" = "401" ] || { echo "::error::未认证请求返回 $code，期望 401"; exit 1; }
+
+          # 从公网入口再测一次（Environment variable APP_URL，例如 https://api.example.com）
+          if [ -n "$APP_URL" ]; then
+            for i in $(seq 1 5); do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "$APP_URL/api/v1/users?limit=1")
+              [ "$code" = "401" ] && break
+              sleep 3
+            done
+            [ "$code" = "401" ] || { echo "::error::公网入口返回 $code，期望 401"; exit 1; }
+            echo "url=$APP_URL" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 迁移成功后，滚动更新或冒烟测试失败：把 Deployment 回滚到上一版本。
+      # 迁移本身不会被回滚，所以迁移必须向后兼容（见 RUNBOOK「发布与回滚」）。
+      - name: 自动回滚
+        if: failure() && steps.migrate.outcome == 'success' && (steps.rollout.outcome == 'failure' || steps.smoke.outcome == 'failure')
+        run: |
+          echo "::error::$ENVIRONMENT 部署 $TAG 失败，正在回滚 Deployment"
+          kubectl -n "$K8S_NS" rollout undo deployment/goapi-api
+          kubectl -n "$K8S_NS" rollout undo deployment/goapi-alertbridge
+          kubectl -n "$K8S_NS" rollout undo deployment/goapi-relay
+          kubectl -n "$K8S_NS" rollout undo deployment/goapi-consumer
+          kubectl -n "$K8S_NS" rollout status deployment/goapi-api --timeout=5m
+          echo "### ⚠️ 已自动回滚 $ENVIRONMENT" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 失败时收集现场
+        if: failure()
+        run: |
+          kubectl -n "$K8S_NS" get pods -o wide || true
+          kubectl -n "$K8S_NS" get events --sort-by=.lastTimestamp | tail -40 || true
+
+      - name: 摘要
+        if: success()
+        run: |
+          {
+            echo "### ✅ 已部署 $ENVIRONMENT"
+            echo "- 镜像：\`$IMAGE_PREFIX/api:$TAG\`"
+            echo "- 提交：${{ needs.plan.outputs.sha }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 清理本地凭据
+        if: always()
+        run: rm -f "$RUNNER_TEMP/kubeconfig" deploy/k8s/base/secrets.env deploy/k8s/base/alertbridge-secrets.env

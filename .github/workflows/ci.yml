@@ -1,0 +1,294 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支 / PR 的新提交会取消还在跑的旧任务
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# 默认最小权限，需要更多权限的 job 单独声明
+permissions:
+  contents: read
+
+env:
+  # 监控工具镜像在这里固定版本，升级时只改一处（本地 docker-compose 同样建议固定）
+  PROMETHEUS_IMAGE: prom/prometheus:v3.5.0
+  ALERTMANAGER_IMAGE: prom/alertmanager:v0.28.1
+  KUBECONFORM_IMAGE: ghcr.io/yannh/kubeconform:latest
+  # 用来生成 ClientTrafficPolicy 等资源的 schema，和集群里装的 Envoy Gateway 保持一致
+  ENVOY_GATEWAY_VERSION: v1.9.0
+  OASDIFF_IMAGE: tufin/oasdiff:latest   # 建议固定版本
+  K6_IMAGE: grafana/k6:latest           # 建议固定版本
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: go.mod / go.sum 是否已整理
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum || {
+            echo "::error::请在本地运行 go mod tidy 并提交 go.mod 和 go.sum"; exit 1; }
+
+      - name: Dockerfile 的 Go 版本和 go.mod 一致
+        run: |
+          mod=$(awk '/^go /{print $2; exit}' go.mod | cut -d. -f1,2)
+          img=$(sed -n 's/^ARG GO_VERSION=//p' Dockerfile)
+          if [ "$mod" != "$img" ]; then
+            echo "::error file=Dockerfile::GO_VERSION=$img，但 go.mod 要求 go $mod，镜像构建会失败。请把 Dockerfile 的 GO_VERSION 改成 $mod"
+            exit 1
+          fi
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::以下文件未格式化，请运行 gofmt -w ."
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: OpenAPI 规范检查
+        run: npx --yes @redocly/cli@latest lint --config api/redocly.yaml api/openapi.yaml
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest   # 建议固定到具体版本，例如 v2.6.2，避免新规则突然让 CI 变红
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d app"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      # 设置后会运行 internal/ratelimit 的 Redis 集成测试
+      # 设置后会运行 internal/outbox 和 internal/consumer 的 NATS 集成测试
+      TEST_NATS_URL: nats://localhost:4222
+      TEST_REDIS_URL: redis://localhost:6379/15
+      # 设置后会运行 internal/store 的 Postgres 集成测试
+      TEST_DATABASE_URL: postgres://app:app@localhost:5432/app?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      # 服务容器不能传启动参数，JetStream 需要 -js，所以单独启动
+      - name: 启动 NATS JetStream
+        run: |
+          docker run -d --name nats -p 4222:4222 -p 8222:8222 nats:2-alpine -js -m 8222
+          for i in $(seq 1 30); do curl -fsS localhost:8222/healthz?js-enabled-only=true >/dev/null && break; sleep 1; done
+
+      - name: go test（含 race 检测和集成测试）
+        # -p 1：store、outbox、consumer 的集成测试共用同一个数据库，必须串行
+        run: go test -race -count=1 -p 1 -shuffle=on -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: 覆盖率摘要
+        run: |
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')
+          echo "### 测试覆盖率：${total}" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 7
+
+  vuln:
+    name: Vulnerability scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true   # 标准库漏洞的修复在新补丁版本里，用最新补丁扫描
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  configs:
+    name: Monitoring & deploy configs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Prometheus 配置与规则语法
+        run: |
+          docker run --rm -v "$PWD/deploy/prometheus:/etc/prometheus:ro" --entrypoint promtool \
+            "$PROMETHEUS_IMAGE" check config /etc/prometheus/prometheus.yml
+
+      - name: 告警规则单元测试
+        run: |
+          docker run --rm -v "$PWD/deploy/prometheus:/etc/prometheus:ro" -w /etc/prometheus \
+            --entrypoint promtool "$PROMETHEUS_IMAGE" test rules tests/alerts_test.yml
+
+      - name: Alertmanager 配置
+        run: |
+          docker run --rm -v "$PWD/deploy/alertmanager:/etc/alertmanager:ro" --entrypoint amtool \
+            "$ALERTMANAGER_IMAGE" check-config /etc/alertmanager/alertmanager.yml
+
+      - name: Grafana 面板 JSON
+        run: jq -e '.uid and (.panels | length > 0)' deploy/grafana/dashboards/goapi.json > /dev/null
+
+      - name: docker-compose.yml
+        run: |
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.loadtest.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.auth.yml config --quiet
+          python3 -c "import json; json.load(open('deploy/keycloak/goapi-realm.json'))"
+
+      - name: 压测脚本（k6 inspect 只解析脚本和 options，不发请求）
+        run: |
+          for f in loadtest/*.js; do
+            echo "::group::$f"
+            docker run --rm -v "$PWD/loadtest:/loadtest:ro" "$K6_IMAGE" inspect "/loadtest/$(basename "$f")" > /dev/null
+            echo "::endgroup::"
+          done
+
+      - name: 自定义资源的 schema（从官方 CRD 生成）
+        run: |
+          # Gateway、HTTPRoute、ClientTrafficPolicy、ServiceMonitor 不在 Kubernetes 内置 schema 里。
+          # 从官方发布的 CRD 现场生成，不再用 -ignore-missing-schemas：缺 schema 的资源会直接报错，而不是被悄悄跳过
+          mkdir -p /tmp/crds /tmp/schemas
+          curl -fsSL -o /tmp/crds/gateway-api.yaml \
+            https://github.com/kubernetes-sigs/gateway-api/releases/latest/download/standard-install.yaml
+          curl -fsSL -o /tmp/crds/envoy-gateway.yaml \
+            "https://github.com/envoyproxy/gateway/releases/download/${ENVOY_GATEWAY_VERSION}/install.yaml"
+          curl -fsSL -o /tmp/crds/prometheus-operator.yaml \
+            https://github.com/prometheus-operator/prometheus-operator/releases/latest/download/bundle.yaml
+          # kind overlay 里的自签 Issuer
+          curl -fsSL -o /tmp/crds/cert-manager.yaml \
+            https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.crds.yaml
+          docker run --rm -v /tmp/crds:/crds:ro -v /tmp/schemas:/schemas -v "$PWD/.github/scripts:/scripts:ro" \
+            python:3.13-slim sh -c "pip install --quiet --disable-pip-version-check pyyaml && python /scripts/crd2schema.py /crds /schemas"
+
+      - name: Kubernetes 清单（kustomize 渲染 + kubeconform 校验）
+        run: |
+          # 密钥文件不在仓库里，用示例文件渲染
+          cp deploy/k8s/base/secrets.env.example deploy/k8s/base/secrets.env
+          cp deploy/k8s/base/alertbridge-secrets.env.example deploy/k8s/base/alertbridge-secrets.env
+          for dir in deploy/k8s/base deploy/k8s/overlays/staging deploy/k8s/overlays/production deploy/k8s/overlays/kind; do
+            echo "::group::$dir"
+            kubectl kustomize "$dir" > /tmp/rendered.yaml
+            docker run --rm -v /tmp/rendered.yaml:/rendered.yaml:ro -v /tmp/schemas:/schemas:ro "$KUBECONFORM_IMAGE" \
+              -strict -summary -kubernetes-version 1.33.0 \
+              -schema-location default \
+              -schema-location '/schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+              /rendered.yaml
+            echo "::endgroup::"
+          done
+          echo "::group::deploy/kind"
+          docker run --rm -v "$PWD/deploy/kind:/kind:ro" -v /tmp/schemas:/schemas:ro "$KUBECONFORM_IMAGE" \
+            -strict -summary -kubernetes-version 1.33.0 \
+            -schema-location default \
+            -schema-location '/schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            /kind/deps.yaml /kind/gatewayclass.yaml
+          echo "::endgroup::"
+
+  # PR 改了接口契约时，检查有没有不兼容的变更（删接口、删字段、改类型、新增必填参数等）。
+  # 确实要做不兼容变更时：走新版本路径（/api/v2），或者在 PR 里说明并让评审确认后忽略这个检查。
+  openapi-breaking:
+    name: OpenAPI breaking changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: 对比目标分支的 api/openapi.yaml
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if ! git show "origin/$BASE_REF:api/openapi.yaml" > /tmp/base-openapi.yaml 2>/dev/null; then
+            echo "目标分支还没有 api/openapi.yaml，跳过"
+            exit 0
+          fi
+          docker run --rm -v /tmp:/base:ro -v "$PWD/api:/rev:ro" "$OASDIFF_IMAGE" \
+            breaking /base/base-openapi.yaml /rev/openapi.yaml --fail-on ERR
+
+  docker:
+    name: Docker (${{ matrix.cmd }})
+    needs: [lint, test, vuln, configs]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write   # 推送到 GHCR
+    strategy:
+      fail-fast: false
+      matrix:
+        cmd: [api, alertbridge, relay, consumer]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v3
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/${{ matrix.cmd }}
+          tags: |
+            type=ref,event=pr
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+
+      # PR 只构建不推送；main 分支和 v* 标签才推送
+      - if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: CMD=${{ matrix.cmd }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.cmd }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.cmd }}

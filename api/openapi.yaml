@@ -1,0 +1,426 @@
+# goapi 的 HTTP 接口契约。改接口时同步改这里：
+#   go test ./internal/httpserver/ 会用它逐条校验真实请求和响应（契约测试），
+#   并检查路由表和这里列出的接口一一对应。
+openapi: 3.0.3
+info:
+  title: goapi
+  version: 0.1.0
+  description: |
+    Go 后端服务模板的示例 API。
+
+    **认证**：`/api/v1` 下的接口都需要 `Authorization: Bearer <access token>`（OIDC 签发的 JWT）。
+    没有或无效的 token 返回 401；角色不够返回 403；
+    暂时拉不到身份提供方的公钥、无法判断 token 是否有效时返回 503 和 `Retry-After`。
+
+    **限流**：按客户端 IP、按用户各一条规则，写接口另有一条更严的按用户规则。超限返回 429 和 `Retry-After`；
+    响应里的 `RateLimit-Limit` / `RateLimit-Remaining` / `RateLimit-Reset` 表示当前额度。
+
+    **分页**：列表接口用游标分页，把响应里的 `next_cursor` 原样传回 `cursor` 参数；
+    没有 `next_cursor` 表示已经是最后一页。
+
+    **错误**：所有错误响应体都是 `{"error": "...", "request_id": "..."}`，
+    排查问题时把 `request_id` 提供给服务端即可找到对应日志。
+servers:
+  - url: /
+    description: 当前站点
+  - url: http://localhost:8080
+    description: 本地开发
+security:
+  - bearerAuth: []
+tags:
+  - name: users
+    description: 用户
+  - name: auth
+    description: 当前调用方
+  - name: health
+    description: 健康检查（不需要认证）
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      operationId: healthz
+      summary: 存活探针
+      description: 进程活着就返回 200，不检查数据库等依赖。
+      security: []
+      responses:
+        "200":
+          description: 进程存活
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+
+  /readyz:
+    get:
+      tags: [health]
+      operationId: readyz
+      summary: 就绪探针
+      description: 检查数据库连通性；服务正在关闭或依赖不可用时返回 503。
+      security: []
+      responses:
+        "200":
+          description: 可以接收流量
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/me:
+    get:
+      tags: [auth]
+      operationId: getMe
+      summary: 当前调用方
+      description: 返回 token 里的身份和角色，用来排查 403。任意有效 token 都可以调用。
+      responses:
+        "200":
+          description: 当前调用方
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Principal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/AuthUnavailable"
+
+  /api/v1/users:
+    get:
+      tags: [users]
+      operationId: listUsers
+      summary: 用户列表
+      description: 按创建时间倒序。需要角色 `goapi-viewer` 或 `goapi-admin`。
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: 一页用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/AuthUnavailable"
+        "504":
+          $ref: "#/components/responses/GatewayTimeout"
+    post:
+      tags: [users]
+      operationId: createUser
+      summary: 创建用户
+      description: 需要角色 `goapi-admin`。邮箱不区分大小写，重复返回 409。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: 已创建
+          headers:
+            Location:
+              description: 新用户的地址
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/AuthUnavailable"
+        "504":
+          $ref: "#/components/responses/GatewayTimeout"
+
+  /api/v1/users/{id}:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    get:
+      tags: [users]
+      operationId: getUser
+      summary: 获取用户
+      description: 需要角色 `goapi-viewer` 或 `goapi-admin`。ID 不是合法 UUID 时同样返回 404。
+      responses:
+        "200":
+          description: 用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/AuthUnavailable"
+        "504":
+          $ref: "#/components/responses/GatewayTimeout"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: OIDC 身份提供方签发的 access token，`aud` 必须包含服务配置的 OIDC_AUDIENCE。
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      description: 每页条数
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Cursor:
+      name: cursor
+      in: query
+      description: 上一页响应里的 `next_cursor`，带签名的不透明字符串，原样传回，不要自己构造或修改
+      schema:
+        type: string
+        maxLength: 512
+    UserID:
+      name: id
+      in: path
+      required: true
+      description: 用户 ID（UUID）
+      schema:
+        type: string
+
+  headers:
+    RetryAfter:
+      description: 多少秒后可以重试
+      schema:
+        type: integer
+        minimum: 1
+    RateLimitLimit:
+      description: 当前规则允许的突发请求数
+      schema:
+        type: integer
+    RateLimitRemaining:
+      description: 还能立即发出的请求数
+      schema:
+        type: integer
+    RateLimitReset:
+      description: 多少秒后额度完全恢复
+      schema:
+        type: integer
+    WWWAuthenticate:
+      description: RFC 6750 认证质询
+      schema:
+        type: string
+
+  schemas:
+    Status:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: 面向开发者的错误说明
+          example: user not found
+        request_id:
+          type: string
+          description: 请求 ID，对应服务端日志里的 request_id
+
+    User:
+      type: object
+      additionalProperties: false
+      required: [id, name, email, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        email:
+          type: string
+          format: email
+        created_at:
+          type: string
+          format: date-time
+
+    UserList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        next_cursor:
+          type: string
+          description: 下一页的游标；没有这个字段表示已经是最后一页
+
+    CreateUserRequest:
+      type: object
+      additionalProperties: false
+      required: [name, email]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Alice
+        email:
+          type: string
+          format: email
+          example: alice@example.com
+
+    Principal:
+      type: object
+      additionalProperties: false
+      required: [sub, roles]
+      properties:
+        sub:
+          type: string
+          description: token 的 subject
+        email:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+          example: [goapi-viewer]
+        scopes:
+          type: array
+          items:
+            type: string
+
+  responses:
+    BadRequest:
+      description: 请求格式错误（JSON 无法解析、包含未知字段、参数超出范围、游标无效等）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: 没有 token，或 token 无效、过期
+      headers:
+        WWW-Authenticate:
+          $ref: "#/components/headers/WWWAuthenticate"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: token 有效，但没有所需角色
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: 资源已存在
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    UnsupportedMediaType:
+      description: 请求体不是 application/json（响应没有响应体）
+    UnprocessableEntity:
+      description: 字段值不合法（例如邮箱格式错误）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TooManyRequests:
+      description: 超出限流额度
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+        RateLimit-Limit:
+          $ref: "#/components/headers/RateLimitLimit"
+        RateLimit-Remaining:
+          $ref: "#/components/headers/RateLimitRemaining"
+        RateLimit-Reset:
+          $ref: "#/components/headers/RateLimitReset"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    AuthUnavailable:
+      description: 暂时无法校验 token（拉不到身份提供方的公钥），稍后按 Retry-After 重试，不要丢弃 token
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InternalError:
+      description: 服务端错误，细节只记录在服务端日志里
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    GatewayTimeout:
+      description: 处理超时
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ServiceUnavailable:
+      description: 服务正在关闭，或依赖不可用
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"

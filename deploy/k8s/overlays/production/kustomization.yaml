@@ -1,0 +1,41 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - gateway.yaml
+  # 集群装了 Prometheus Operator（kube-prometheus-stack）时取消注释
+  # - servicemonitor.yaml
+
+# 发布时改成具体版本（CI 推送的语义化标签或短 SHA），不要在生产用 latest：
+#   cd deploy/k8s/overlays/production && kustomize edit set image goapi-api=ghcr.io/your-org/goapi/api:v1.2.3
+images:
+  - name: goapi-api
+    newName: ghcr.io/your-org/goapi/api
+    newTag: v0.1.0
+  - name: goapi-alertbridge
+    newName: ghcr.io/your-org/goapi/alertbridge
+    newTag: v0.1.0
+  - name: goapi-relay
+    newName: ghcr.io/your-org/goapi/relay
+    newTag: v0.1.0
+  - name: goapi-consumer
+    newName: ghcr.io/your-org/goapi/consumer
+    newTag: v0.1.0
+
+configMapGenerator:
+  - name: goapi-config
+    behavior: merge
+    literals:
+      - TRACE_SAMPLE_RATIO=0.05
+      - DOCS_ENABLED=false   # 不对公网公开接口文档；需要时改为 true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring.svc:4318
+
+patches:
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: goapi-api
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 3

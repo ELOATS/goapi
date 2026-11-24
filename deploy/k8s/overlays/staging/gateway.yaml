@@ -1,0 +1,96 @@
+# 集群入口：Gateway API + Envoy Gateway（替代已停止维护的 ingress-nginx）。
+# 需要集群里已安装：Gateway API CRD（standard channel）、Envoy Gateway、
+# cert-manager（并开启 Gateway API 支持，见 docs/LAUNCH_CHECKLIST.md）。
+# gatewayClassName 按集群实际名称修改；Envoy Gateway 快速安装时创建的是 eg。
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: goapi
+  annotations:
+    # cert-manager 会为下面带 tls 的监听器签发证书，写入 certificateRefs 指向的 Secret
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: staging-api.example.com
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: staging-api.example.com
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: goapi-api-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+# 业务路由：只暴露 /api，探针和指标不对外
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: goapi-api
+spec:
+  parentRefs:
+    - name: goapi
+      sectionName: https
+  hostnames:
+    - staging-api.example.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+      backendRefs:
+        - name: goapi-api
+          port: 80
+      # Envoy 默认的请求超时是 15s，比应用的处理超时（HTTP_HANDLER_TIMEOUT=20s）短，
+      # 会在应用返回 504 之前先断开。设成和 HTTP_WRITE_TIMEOUT 一致
+      timeouts:
+        request: 30s
+---
+# HTTP 一律 301 跳转到 HTTPS
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: goapi-http-redirect
+spec:
+  parentRefs:
+    - name: goapi
+      sectionName: http
+  hostnames:
+    - staging-api.example.com
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+---
+# Envoy Gateway 扩展：客户端连接相关的设置
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: goapi
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: goapi
+  # 客户端 IP：应用从 X-Envoy-External-Address 读取（HTTP_CLIENT_IP_HEADER）。
+  # Envoy 会先删掉客户端自带的这个头，再写入它认定的客户端地址，客户端无法伪造。
+  #
+  # 默认它认定的是直接连到 Envoy 的地址。前面还有云负载均衡时，取决于负载均衡怎么传客户端 IP：
+  #   - 负载均衡在 TCP 层保留了源地址（例如 AWS NLB 的 instance 模式 + externalTrafficPolicy: Local）：不用改
+  #   - 负载均衡通过 X-Forwarded-For 传：取消下面的注释，numTrustedHops 填负载均衡的层数
+  #   - 负载均衡用 PROXY protocol：参考 Envoy Gateway 文档配置 proxyProtocol
+  # clientIPDetection:
+  #   xForwardedFor:
+  #     numTrustedHops: 1

@@ -1,0 +1,120 @@
+# outbox relay：把 outbox_events 投递到 NATS JetStream。
+# 多副本是安全的（FOR UPDATE SKIP LOCKED），2 个副本保证单个 Pod 故障时不中断投递。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: goapi-relay
+  labels:
+    app.kubernetes.io/name: goapi-relay
+    app.kubernetes.io/component: relay
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: goapi-relay
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: goapi-relay
+        app.kubernetes.io/component: relay
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: goapi
+      automountServiceAccountToken: false
+      # 收到 SIGTERM 后处理完当前批次再退出（单批最长 RELAY_BATCH_TIMEOUT=30s）
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: goapi-relay
+      containers:
+        - name: relay
+          image: goapi-relay
+          ports:
+            - name: metrics
+              containerPort: 9090
+          envFrom:
+            - configMapRef:
+                name: goapi-config
+            - secretRef:
+                name: goapi-secrets
+          env:
+            # 覆盖 goapi-config 里给 API 用的值
+            - name: OTEL_SERVICE_NAME
+              value: goapi-relay
+            - name: GOMEMLIMIT
+              value: 110MiB
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz   # 主循环 2 分钟没动就失败
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: goapi-relay-metrics
+  labels:
+    app.kubernetes.io/name: goapi-relay
+    app.kubernetes.io/component: metrics
+spec:
+  selector:
+    app.kubernetes.io/name: goapi-relay
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: goapi-relay
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: goapi-relay
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: goapi-relay
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: goapi-relay
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 9090

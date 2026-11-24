@@ -1,0 +1,9 @@
+# 本地压测延迟和吞吐时叠加使用：关闭限流、降低日志和链路采样，避免测到的是限流或观测开销。
+#   docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d --build
+# 验证限流（make loadtest-ratelimit）时不要叠加这个文件。
+services:
+  api:
+    environment:
+      RATE_LIMIT_ENABLED: "false"
+      LOG_LEVEL: warn             # 2xx 的访问日志是 info 级别，压测时会刷屏
+      TRACE_SAMPLE_RATIO: "0.01"

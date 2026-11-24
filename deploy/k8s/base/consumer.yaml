@@ -1,0 +1,120 @@
+# 示例事件消费者：订阅 user.created，为新用户记录欢迎通知。
+# 多副本共享同一个 JetStream 持久消费者，消息会分给各副本；按 Event-Id 去重。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: goapi-consumer
+  labels:
+    app.kubernetes.io/name: goapi-consumer
+    app.kubernetes.io/component: consumer
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: goapi-consumer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: goapi-consumer
+        app.kubernetes.io/component: consumer
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: goapi
+      automountServiceAccountToken: false
+      # 收到 SIGTERM 后处理完手上这条再退出（最长 CONSUMER_HANDLER_TIMEOUT=20s + 一次拉取等待 5s）
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: goapi-consumer
+      containers:
+        - name: consumer
+          image: goapi-consumer
+          ports:
+            - name: metrics
+              containerPort: 9090
+          envFrom:
+            - configMapRef:
+                name: goapi-config
+            - secretRef:
+                name: goapi-secrets
+          env:
+            # 覆盖 goapi-config 里给 API 用的值
+            - name: OTEL_SERVICE_NAME
+              value: goapi-consumer
+            - name: GOMEMLIMIT
+              value: 110MiB
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz   # 主循环 2 分钟没动就失败
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: goapi-consumer-metrics
+  labels:
+    app.kubernetes.io/name: goapi-consumer
+    app.kubernetes.io/component: metrics
+spec:
+  selector:
+    app.kubernetes.io/name: goapi-consumer
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: goapi-consumer
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: goapi-consumer
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: goapi-consumer
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: goapi-consumer
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 9090

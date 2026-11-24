@@ -1,0 +1,151 @@
+# promtool 告警规则单元测试：make test-rules
+# 注释只描述场景；预期的 annotations 必须与 alerts.yml 完全一致，改了文案要同步改这里。
+rule_files:
+- ../rules.yml
+- ../alerts.yml
+evaluation_interval: 1m
+tests:
+- name: Watchdog 始终触发
+  interval: 1m
+  input_series:
+  - series: up{job="goapi",instance="api-1:9090"}
+    values: 1x10
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: Watchdog
+    exp_alerts:
+    - exp_labels:
+        severity: none
+        service: goapi
+      exp_annotations:
+        summary: 告警链路心跳（始终触发）
+        description: 这条告警永远处于触发状态。如果死信监控服务收不到它，说明 Prometheus 或 Alertmanager 本身出了问题。
+        runbook_url: https://github.com/your-org/goapi/blob/main/deploy/RUNBOOK.md#watchdog
+- name: 实例宕机：未满 1 分钟不告警，满 1 分钟告警；健康实例不告警
+  interval: 1m
+  input_series:
+  - series: up{job="goapi",instance="api-1:9090"}
+    values: 1 1 0 0 0 0
+  - series: up{job="goapi",instance="api-2:9090"}
+    values: 1 1 1 1 1 1
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: GoapiInstanceDown
+    exp_alerts: []
+  - eval_time: 4m
+    alertname: GoapiInstanceDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        service: goapi
+        job: goapi
+        instance: api-1:9090
+      exp_annotations:
+        summary: goapi 实例 api-1:9090 无法抓取
+        description: Prometheus 已连续 1 分钟抓不到 api-1:9090 的 /metrics。
+        runbook_url: https://github.com/your-org/goapi/blob/main/deploy/RUNBOOK.md#goapiinstancedown
+- name: 没有任何 goapi 抓取目标
+  interval: 1m
+  input_series:
+  - series: up{job="other",instance="x:9090"}
+    values: 1x10
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: GoapiTargetMissing
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: GoapiTargetMissing
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        service: goapi
+        job: goapi
+      exp_annotations:
+        summary: Prometheus 中没有任何 goapi 抓取目标
+        description: 服务发现或抓取配置可能有误，所有 goapi 告警都已失效。
+        runbook_url: https://github.com/your-org/goapi/blob/main/deploy/RUNBOOK.md#goapitargetmissing
+- name: 有目标时不报 TargetMissing
+  interval: 1m
+  input_series:
+  - series: up{job="goapi",instance="api-1:9090"}
+    values: 1x10
+  alert_rule_test:
+  - eval_time: 8m
+    alertname: GoapiTargetMissing
+    exp_alerts: []
+- name: relay 全部宕机 3 分钟后告警
+  interval: 1m
+  input_series:
+  - series: up{job="goapi-relay",instance="relay-1:9090"}
+    values: 1 1 0 0 0 0 0 0
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: GoapiRelayAllDown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: GoapiRelayAllDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        service: goapi
+      exp_annotations:
+        summary: 没有正常运行的 outbox relay
+        description: 所有 relay 实例都抓不到（或一个都没有），事件不会被投递，积压会一直增长。
+        runbook_url: https://github.com/your-org/goapi/blob/main/deploy/RUNBOOK.md#goapirelayalldown
+- name: 出现死信事件
+  interval: 1m
+  input_series:
+  - series: outbox_dead_events{job="goapi-relay",instance="relay-1:9090"}
+    values: 0 0 2 2 2 2
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: GoapiOutboxDeadEvents
+    exp_alerts: []
+  - eval_time: 4m
+    alertname: GoapiOutboxDeadEvents
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        service: goapi
+      exp_annotations:
+        summary: 有 outbox 事件进入死信
+        description: 有事件被判定为无法投递（例如消息过大或事件类型非法），已停止重试，需要人工处理。
+        runbook_url: https://github.com/your-org/goapi/blob/main/deploy/RUNBOOK.md#goapioutboxdeadevents
+- name: 消费者出现死信
+  interval: 1m
+  input_series:
+  - series: consumer_dead_letters{job="goapi-consumer",instance="consumer-1:9090"}
+    values: 0 0 1 1 1 1
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: GoapiConsumerDeadLetters
+    exp_alerts: []
+  - eval_time: 4m
+    alertname: GoapiConsumerDeadLetters
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        service: goapi
+      exp_annotations:
+        summary: 事件消费者有死信
+        description: 有消息处理失败并已停止重试，需要修复后重放。
+        runbook_url: https://github.com/your-org/goapi/blob/main/deploy/RUNBOOK.md#goapiconsumerdeadletters
+- name: 消费者全部宕机 3 分钟后告警
+  interval: 1m
+  input_series:
+  - series: up{job="goapi-consumer",instance="consumer-1:9090"}
+    values: 1 0 0 0 0 0 0
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: GoapiConsumerAllDown
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: GoapiConsumerAllDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        service: goapi
+      exp_annotations:
+        summary: 没有正常运行的事件消费者
+        description: 所有 consumer 实例都抓不到（或一个都没有），消息会在 JetStream 里积压。
+        runbook_url: https://github.com/your-org/goapi/blob/main/deploy/RUNBOOK.md#goapiconsumeralldown

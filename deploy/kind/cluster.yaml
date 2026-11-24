@@ -1,0 +1,10 @@
+# 本地验证用的 kind 集群：1 个控制面节点 + 2 个工作节点。
+# 两个工作节点用来验证：api 副本分散到不同节点（topologySpreadConstraints）、驱逐节点时 PDB 是否生效。
+# 由 scripts/kind.ps1 up 使用。
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: goapi
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker

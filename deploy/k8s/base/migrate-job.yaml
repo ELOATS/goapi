@@ -1,0 +1,55 @@
+# 数据库迁移。发布流程（make k8s-deploy）：
+#   1. 删除旧 Job（Job 的 spec.template 不可修改，换镜像必须重建）
+#   2. 只应用带 pre-deploy 标签的资源：命名空间、配置、密钥、这个 Job
+#   3. 等 Job 成功
+#   4. 再应用全部资源，Deployment 开始滚动更新
+# 这样新版本的 Pod 不会在表结构就绪之前启动。迁移要向后兼容（先加列、后删列），
+# 因为滚动期间新旧版本会同时运行。
+# 用 Argo CD 时可以改成 PreSync hook，用 Helm 时改成 pre-upgrade hook。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: goapi-migrate
+  labels:
+    app.kubernetes.io/name: goapi-migrate
+    app.kubernetes.io/component: migrate
+    goapi.example.com/phase: pre-deploy
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: goapi-migrate
+    spec:
+      serviceAccountName: goapi
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532      # distroless nonroot
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: goapi-api
+          args: ["migrate"]
+          envFrom:
+            - configMapRef:
+                name: goapi-config
+            - secretRef:
+                name: goapi-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

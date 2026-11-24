@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: goapi-api
+  labels:
+    app.kubernetes.io/name: goapi-api
+    app.kubernetes.io/component: api
+spec:
+  # 不写 replicas：副本数交给 HPA 管，否则每次 apply 都会把它重置
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: goapi-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 0       # 先起新的、就绪后再停旧的
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: goapi-api
+        app.kubernetes.io/component: api
+      annotations:
+        # 没有 Prometheus Operator 时，基于注解的抓取配置会用到
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: goapi
+      automountServiceAccountToken: false
+      # 应用收到 SIGTERM 后：/readyz 返回 503 → 等 SHUTDOWN_DRAIN_DELAY 让各处摘掉流量
+      # → Shutdown 等在途请求。整个过程必须在这个时间内完成，否则会被 SIGKILL
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532      # distroless nonroot
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      # 尽量把副本分散到不同节点和可用区，单节点故障不会全挂
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: goapi-api
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: goapi-api
+      containers:
+        - name: api
+          image: goapi-api
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics
+              containerPort: 9090
+          envFrom:
+            - configMapRef:
+                name: goapi-config
+            - secretRef:
+                name: goapi-secrets
+          env:
+            # 链路和日志里带上 Pod 信息，方便定位
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: k8s.namespace.name=$(POD_NAMESPACE),k8s.pod.name=$(POD_NAME),k8s.node.name=$(NODE_NAME)
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              # 不设 CPU limit：避免 CFS 节流导致延迟毛刺；靠 requests 做调度和 HPA
+              memory: 256Mi
+          # 启动阶段要连数据库，给足时间，期间不做存活检查
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          # 存活探针只看进程本身，不依赖数据库：数据库故障时重启 Pod 没有用
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          # 就绪探针会 Ping 数据库；关闭期间返回 503
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

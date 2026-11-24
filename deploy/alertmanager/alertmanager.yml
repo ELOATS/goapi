@@ -1,0 +1,104 @@
+# Alertmanager 配置。校验：make check-alertmanager
+global:
+  resolve_timeout: 5m
+
+# 告警路由：自上而下匹配，命中第一个子路由即停止（未设置 continue）。
+route:
+  receiver: team                      # 兜底：未命中任何子路由的告警
+  group_by: [alertname, service]      # 同名告警合并成一条消息，例如 3 个实例同时挂掉只发 1 条
+  group_wait: 30s                     # 新分组首次发送前等待，收集同组的其他告警
+  group_interval: 5m                  # 同组有新告警加入时，最快多久再发一次
+  repeat_interval: 4h                 # 一直没恢复时，多久重复提醒一次
+  routes:
+    # 心跳：始终触发，用来证明告警链路是通的，见 RUNBOOK 的 Watchdog 一节
+    - matchers: ['alertname="Watchdog"']
+      receiver: "null"
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 1m
+
+    # critical：全天候，飞书 + 钉钉同时发，更快、更频繁地提醒
+    - matchers: ['severity="critical"']
+      receiver: oncall
+      group_wait: 10s
+      group_interval: 1m
+      repeat_interval: 1h
+
+    # warning：只在工作时间推送；下班期间静音，次日上班后若仍未恢复会补发
+    - matchers: ['severity="warning"']
+      receiver: team
+      mute_time_intervals: [offhours]
+      repeat_interval: 12h
+
+# 时区按团队所在地调整
+time_intervals:
+  - name: offhours
+    time_intervals:
+      - weekdays: ['saturday', 'sunday']
+        location: Asia/Taipei
+      - weekdays: ['monday:friday']
+        times:
+          - start_time: '00:00'
+            end_time: '09:00'
+          - start_time: '19:00'
+            end_time: '24:00'
+        location: Asia/Taipei
+
+# 抑制规则：根因告警触发时，压掉由它引起的次生告警，避免告警风暴。
+inhibit_rules:
+  # 没有任何抓取目标时，其它 goapi 告警都没有意义
+  - source_matchers: ['alertname="GoapiTargetMissing"']
+    target_matchers: ['service="goapi"', 'alertname!~"GoapiTargetMissing|Watchdog"']
+    equal: [service]
+
+  # 实例挂了，就不再报这个实例的连接池、goroutine 等告警
+  - source_matchers: ['alertname="GoapiInstanceDown"']
+    target_matchers: ['service="goapi"', 'alertname!="GoapiInstanceDown"']
+    equal: [instance]
+
+  # 快速燃烧已经报了，慢速燃烧就不用再报
+  - source_matchers: ['alertname="GoapiErrorBudgetFastBurn"']
+    target_matchers: ['alertname="GoapiErrorBudgetSlowBurn"']
+    equal: [service]
+
+  # 已经有请求等连接超时（critical），连接池饱和 / 排队属于同一问题
+  - source_matchers: ['alertname="GoapiDBAcquireCanceled"']
+    target_matchers: ['alertname=~"GoapiDBPoolSaturated|GoapiDBPoolWaiting"']
+    equal: [instance]
+
+  # relay 全挂了，延迟告警是它的结果
+  - source_matchers: ['alertname="GoapiRelayAllDown"']
+    target_matchers: ['alertname="GoapiOutboxLagging"']
+    equal: [service]
+
+  # 消费者全挂了，积压告警是它的结果
+  - source_matchers: ['alertname="GoapiConsumerAllDown"']
+    target_matchers: ['alertname="GoapiConsumerLagging"']
+    equal: [service]
+
+receivers:
+  # 丢弃。上线后建议把 Watchdog 改发到死信监控（dead man's switch）服务
+  - name: "null"
+
+  - name: team
+    webhook_configs:
+      - url: http://alertbridge:8080/feishu
+        send_resolved: true
+        max_alerts: 20
+
+  - name: oncall
+    webhook_configs:
+      - url: http://alertbridge:8080/feishu
+        send_resolved: true
+        max_alerts: 20
+      - url: http://alertbridge:8080/dingtalk
+        send_resolved: true
+        max_alerts: 20
+    # 也可以同时发 Slack（原生支持，不经过 alertbridge）。
+    # 把 Incoming Webhook 地址写入 secrets/slack_webhook_url 并挂载进容器：
+    # slack_configs:
+    #   - api_url_file: /etc/alertmanager/secrets/slack_webhook_url
+    #     channel: '#oncall'
+    #     send_resolved: true
+    #     title: '{{ .Status | toUpper }}: {{ .CommonLabels.alertname }}'
+    #     text: '{{ range .Alerts }}• {{ .Annotations.summary }}{{ "\n" }}{{ end }}'

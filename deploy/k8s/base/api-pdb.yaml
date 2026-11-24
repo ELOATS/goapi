@@ -1,0 +1,10 @@
+# 节点维护、集群升级驱逐 Pod 时，最多同时少一个
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: goapi-api
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: goapi-api

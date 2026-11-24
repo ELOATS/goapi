@@ -1,0 +1,18 @@
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - noctx
+    - revive
+    - unconvert
+  exclusions:
+    rules:
+      # 都是 internal 包，不要求每个导出符号都写文档注释；需要时删掉这条
+      - linters: [revive]
+        text: "^exported:"
+      # 测试代码：httptest 请求不带 ctx、测试里关闭响应体、拼接测试 URL 这类检查只是噪音
+      - path: _test\.go
+        linters: [errcheck, noctx, bodyclose, gosec]

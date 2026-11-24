@@ -1,0 +1,170 @@
+# 固定 compose 项目名，不随目录名变化：目录叫 goapi 时，默认项目名也是 goapi，
+# 容易和同名的其它项目共用网络（goapi_default）和数据卷（goapi_pgdata），
+# 出现容器连不上网络、数据库密码不对等问题。
+name: goapi-template
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    ports:
+      - "${GOAPI_DB_PORT:-15432}:5432"   # 宿主机端口避开常见的 5432，容器之间仍用 db:5432
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres-init:/docker-entrypoint-initdb.d:ro   # 首次初始化时建测试库 app_test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${GOAPI_REDIS_PORT:-16379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  # NATS JetStream：事件投递目标；监控页 http://localhost:18222
+  nats:
+    image: nats:2-alpine
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "${GOAPI_NATS_PORT:-14222}:4222"
+      - "${GOAPI_NATS_MONITOR_PORT:-18222}:8222"
+
+  # Jaeger v2：直接接收 OTLP，UI 在 http://localhost:16686
+  jaeger:
+    image: jaegertracing/jaeger:latest   # 生产/CI 请固定版本号
+    ports:
+      - "16686:16686"
+      - "4318:4318"
+
+  # Prometheus：UI 在 http://localhost:9091
+  prometheus:
+    image: prom/prometheus:latest        # 生产/CI 请固定版本号
+    volumes:
+      - ./deploy/prometheus:/etc/prometheus:ro
+    ports:
+      - "9091:9090"
+    depends_on:
+      - api
+      - alertmanager
+
+  # Alertmanager：http://localhost:9093
+  alertmanager:
+    image: prom/alertmanager:latest      # 生产/CI 请固定版本号
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.external-url=http://localhost:9093   # 消息里「静默」链接的前缀
+    volumes:
+      - ./deploy/alertmanager:/etc/alertmanager:ro
+    ports:
+      - "9093:9093"
+    depends_on:
+      - alertbridge
+
+  # 飞书 / 钉钉转发。webhook 地址从项目根目录的 .env 读取；不填则只打印到日志
+  alertbridge:
+    build:
+      context: .
+      args:
+        CMD: alertbridge
+    environment:
+      ALERT_TIMEZONE: Asia/Taipei
+      FEISHU_WEBHOOK_URL: ${FEISHU_WEBHOOK_URL:-}
+      FEISHU_SECRET: ${FEISHU_SECRET:-}
+      DINGTALK_WEBHOOK_URL: ${DINGTALK_WEBHOOK_URL:-}
+      DINGTALK_SECRET: ${DINGTALK_SECRET:-}
+
+  # Grafana：http://localhost:3000（本地免登录，只读）
+  grafana:
+    image: grafana/grafana:latest        # 生产/CI 请固定版本号
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: admin     # 仅本地使用
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/goapi.json
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+  # outbox relay：把 outbox_events 投递到 NATS；指标 http://localhost:9092/metrics
+  relay:
+    build:
+      context: .
+      args:
+        CMD: relay
+    depends_on:
+      db:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      api:
+        condition: service_started   # 迁移由 api 启动时执行
+    environment:
+      APP_ENV: local
+      DATABASE_URL: postgres://app:app@db:5432/app?sslmode=disable
+      NATS_URL: nats://nats:4222
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: goapi-relay
+      METRICS_ADDR: ":9090"
+    ports:
+      - "9092:9090"
+
+  # 示例事件消费者：订阅 user.created；指标 http://localhost:9094/metrics
+  consumer:
+    build:
+      context: .
+      args:
+        CMD: consumer
+    depends_on:
+      db:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      relay:
+        condition: service_started   # 流由 relay 创建；consumer 会重试等待
+    environment:
+      APP_ENV: local
+      DATABASE_URL: postgres://app:app@db:5432/app?sslmode=disable
+      NATS_URL: nats://nats:4222
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: goapi-consumer
+      METRICS_ADDR: ":9090"
+    ports:
+      - "9094:9090"
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: local          # 本地整套环境不接身份提供方，所以关闭认证（prod 下不允许）
+      AUTH_DISABLED: "true"
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgres://app:app@db:5432/app?sslmode=disable
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: goapi
+      TRACE_SAMPLE_RATIO: "1.0"
+      METRICS_ADDR: ":9090"
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+
+volumes:
+  pgdata:

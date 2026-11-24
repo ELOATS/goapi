@@ -1,0 +1,8 @@
+.git
+bin/
+*.md
+.env
+docker-compose.yml
+deploy/
+loadtest/
+docker-compose.loadtest.yml

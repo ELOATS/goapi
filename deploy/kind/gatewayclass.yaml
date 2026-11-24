@@ -1,0 +1,7 @@
+# Envoy Gateway 的 Helm chart 不会创建 GatewayClass，overlay 里的 Gateway 用的是 gatewayClassName: eg
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller

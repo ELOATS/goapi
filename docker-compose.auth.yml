@@ -1,0 +1,39 @@
+# 叠加在 docker-compose.yml 上，开启认证并加一个本地 Keycloak：
+#   docker compose -f docker-compose.yml -f docker-compose.auth.yml up -d --build
+# 或者设一次环境变量，之后的 docker compose 命令都会带上两个文件（Windows 用分号分隔）：
+#   $env:COMPOSE_FILE = "docker-compose.yml;docker-compose.auth.yml"
+# 拿 token：.\scripts\get-token.ps1 alice
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest    # 建议固定版本
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin                             # 仅本地
+      # issuer 固定为宿主机地址：命令行从 localhost 拿到的 token，iss 就是这个地址
+      KC_HOSTNAME: http://localhost:${GOAPI_KEYCLOAK_PORT:-8180}
+      # 容器里的 api 通过 keycloak:8080 访问时，jwks_uri 等后端地址按请求的地址生成，不会指向 localhost
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "${GOAPI_KEYCLOAK_PORT:-8180}:8080"
+    volumes:
+      - ./deploy/keycloak:/opt/keycloak/data/import:ro
+    healthcheck:
+      # 镜像里没有 curl，用 bash 的 /dev/tcp 请求管理端口上的就绪检查
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  api:
+    depends_on:
+      keycloak:
+        condition: service_healthy   # api 启动时要做 OIDC discovery，Keycloak 没就绪会直接退出
+    environment:
+      AUTH_DISABLED: "false"
+      OIDC_ISSUER_URL: http://localhost:${GOAPI_KEYCLOAK_PORT:-8180}/realms/goapi
+      OIDC_DISCOVERY_URL: http://keycloak:8080/realms/goapi
+      OIDC_AUDIENCE: goapi
+      OIDC_ROLES_CLAIM: realm_access.roles

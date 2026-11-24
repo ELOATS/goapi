@@ -1,0 +1,6 @@
+# OpenAPI 规范检查（make openapi-lint）
+extends:
+  - recommended
+rules:
+  info-license: off          # 内部服务，不需要声明许可证
+  no-server-example.com: off

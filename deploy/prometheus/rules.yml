@@ -1,0 +1,45 @@
+# 由模板生成；阈值是起点，请按你的流量和 SLO 调整。
+groups:
+- name: goapi-recording
+  interval: 30s
+  rules:
+  - record: job:http_request_errors:ratio_rate5m
+    expr: 'sum by (job) (rate(http_requests_total{job="goapi",status=~"5.."}[5m]))
+
+      /
+
+      sum by (job) (rate(http_requests_total{job="goapi"}[5m]))
+
+      '
+  - record: job:http_request_errors:ratio_rate30m
+    expr: 'sum by (job) (rate(http_requests_total{job="goapi",status=~"5.."}[30m]))
+
+      /
+
+      sum by (job) (rate(http_requests_total{job="goapi"}[30m]))
+
+      '
+  - record: job:http_request_errors:ratio_rate1h
+    expr: 'sum by (job) (rate(http_requests_total{job="goapi",status=~"5.."}[1h]))
+
+      /
+
+      sum by (job) (rate(http_requests_total{job="goapi"}[1h]))
+
+      '
+  - record: job:http_request_errors:ratio_rate6h
+    expr: 'sum by (job) (rate(http_requests_total{job="goapi",status=~"5.."}[6h]))
+
+      /
+
+      sum by (job) (rate(http_requests_total{job="goapi"}[6h]))
+
+      '
+  - record: route:http_requests:rate5m
+    expr: 'sum by (job, route) (rate(http_requests_total{job="goapi"}[5m]))
+
+      '
+  - record: route:http_request_duration_seconds:p99_5m
+    expr: 'histogram_quantile(0.99, sum by (job, route, le) (rate(http_request_duration_seconds_bucket{job="goapi"}[5m])))
+
+      '

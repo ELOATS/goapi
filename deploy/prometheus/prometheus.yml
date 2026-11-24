@@ -1,0 +1,25 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - rules.yml
+  - alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: goapi
+    static_configs:
+      - targets: ["api:9090"]
+
+  - job_name: goapi-relay
+    static_configs:
+      - targets: ["relay:9090"]
+
+  - job_name: goapi-consumer
+    static_configs:
+      - targets: ["consumer:9090"]

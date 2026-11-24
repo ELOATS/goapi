@@ -1,0 +1,69 @@
+# 本地 kind 集群：scripts/kind.ps1 deploy 使用。只用于本地验证。
+# 和 staging 的区别：
+#   - 依赖（Postgres / Redis / NATS）在集群里的 goapi-deps 命名空间，地址写在下面的 secret 里
+#   - 关闭认证（kind 里没有身份提供方；认证用 docker-compose.auth.yml 在本地验证）
+#   - 证书用 cert-manager 自签，域名 api.goapi.test，通过 kubectl port-forward 访问
+#   - 镜像在本地构建后用 kind load 导入，标签固定为 kind
+#   - 限流额度调高：kind 里所有请求都来自私有网段，客户端 IP 都是 Envoy Pod 的地址，
+#     认证关闭后所有请求又是同一个用户，按默认额度会被限流挡住，测不了滚动更新
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: goapi-kind
+
+resources:
+  - ../../base
+  - issuer.yaml
+  - gateway.yaml
+
+images:
+  - name: goapi-api
+    newName: goapi/api
+    newTag: kind
+  - name: goapi-alertbridge
+    newName: goapi/alertbridge
+    newTag: kind
+  - name: goapi-relay
+    newName: goapi/relay
+    newTag: kind
+  - name: goapi-consumer
+    newName: goapi/consumer
+    newTag: kind
+
+configMapGenerator:
+  - name: goapi-config
+    behavior: merge
+    literals:
+      - APP_ENV=local
+      - AUTH_DISABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=
+      - RATE_LIMIT_IP_RPS=1000
+      - RATE_LIMIT_IP_BURST=2000
+      - RATE_LIMIT_USER_RPS=1000
+      - RATE_LIMIT_USER_BURST=2000
+
+# 整个替换 base 里从 secrets.env 生成的内容，不会用到你本地的 secrets.env
+secretGenerator:
+  - name: goapi-secrets
+    behavior: replace
+    literals:
+      - DATABASE_URL=postgres://app:app@postgres.goapi-deps.svc:5432/app?sslmode=disable
+      - REDIS_URL=redis://redis.goapi-deps.svc:6379/0
+      - NATS_URL=nats://nats.goapi-deps.svc:4222
+      - CURSOR_SECRET=kind-local-cursor-signing-key-not-for-production-use
+    options:
+      labels:
+        goapi.example.com/phase: pre-deploy
+
+patches:
+  # 2–4 个副本：既能看到副本分散在两个工作节点上，也能观察 HPA 扩容
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: goapi-api
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 2
+      - op: replace
+        path: /spec/maxReplicas
+        value: 4

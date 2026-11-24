@@ -1,0 +1,15 @@
+[
+  {
+    "labels": {
+      "alertname": "GoapiTestAlert",
+      "severity": "critical",
+      "service": "goapi",
+      "instance": "test:9090"
+    },
+    "annotations": {
+      "summary": "这是一条测试告警",
+      "description": "用来验证 Alertmanager → alertbridge → 飞书/钉钉 的链路是否通畅，5 分钟后自动恢复。",
+      "runbook_url": "https://github.com/your-org/goapi/blob/main/deploy/RUNBOOK.md"
+    }
+  }
+]

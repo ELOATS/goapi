@@ -1,0 +1,7 @@
+# 自签证书，只用于本地。Gateway 上的注解 cert-manager.io/issuer 指向它
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: goapi-selfsigned
+spec:
+  selfSigned: {}
