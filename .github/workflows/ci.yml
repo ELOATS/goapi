@@ -33,9 +33,16 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+      # 不直接用 go-version-file：go mod tidy 会把 go.mod 写成 "go 1.26.0" 这种精确版本，
+      # setup-go 就只装 1.26.0，测试和漏洞扫描都跑在没有安全补丁的旧版本上。
+      # 这里取 go.mod 的主次版本，装这个系列的最新补丁版本（和 Dockerfile 用的 golang:1.26 镜像一致）
+      - id: gover
+        run: echo "go=$(awk '/^go /{print \$2; exit}' go.mod | cut -d. -f1,2).x" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: ${{ steps.gover.outputs.go }}
+          check-latest: true
+      - run: go version
 
       - name: go.mod / go.sum 是否已整理
         run: |
@@ -45,7 +52,7 @@ jobs:
 
       - name: Dockerfile 的 Go 版本和 go.mod 一致
         run: |
-          mod=$(awk '/^go /{print $2; exit}' go.mod | cut -d. -f1,2)
+          mod=$(awk '/^go /{print \$2; exit}' go.mod | cut -d. -f1,2)
           img=$(sed -n 's/^ARG GO_VERSION=//p' Dockerfile)
           if [ "$mod" != "$img" ]; then
             echo "::error file=Dockerfile::GO_VERSION=$img，但 go.mod 要求 go $mod，镜像构建会失败。请把 Dockerfile 的 GO_VERSION 改成 $mod"
@@ -107,9 +114,16 @@ jobs:
       TEST_DATABASE_URL: postgres://app:app@localhost:5432/app?sslmode=disable
     steps:
       - uses: actions/checkout@v6
+      # 不直接用 go-version-file：go mod tidy 会把 go.mod 写成 "go 1.26.0" 这种精确版本，
+      # setup-go 就只装 1.26.0，测试和漏洞扫描都跑在没有安全补丁的旧版本上。
+      # 这里取 go.mod 的主次版本，装这个系列的最新补丁版本（和 Dockerfile 用的 golang:1.26 镜像一致）
+      - id: gover
+        run: echo "go=$(awk '/^go /{print \$2; exit}' go.mod | cut -d. -f1,2).x" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: ${{ steps.gover.outputs.go }}
+          check-latest: true
+      - run: go version
 
       # 服务容器不能传启动参数，JetStream 需要 -js，所以单独启动
       - name: 启动 NATS JetStream
@@ -123,7 +137,7 @@ jobs:
 
       - name: 覆盖率摘要
         run: |
-          total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {print \$3}')
           echo "### 测试覆盖率：${total}" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v5
@@ -138,10 +152,16 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+      # 不直接用 go-version-file：go mod tidy 会把 go.mod 写成 "go 1.26.0" 这种精确版本，
+      # setup-go 就只装 1.26.0，测试和漏洞扫描都跑在没有安全补丁的旧版本上。
+      # 这里取 go.mod 的主次版本，装这个系列的最新补丁版本（和 Dockerfile 用的 golang:1.26 镜像一致）
+      - id: gover
+        run: echo "go=$(awk '/^go /{print \$2; exit}' go.mod | cut -d. -f1,2).x" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
-          check-latest: true   # 标准库漏洞的修复在新补丁版本里，用最新补丁扫描
+          go-version: ${{ steps.gover.outputs.go }}
+          check-latest: true
+      - run: go version
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
@@ -265,10 +285,14 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      # GHCR 的镜像路径必须全小写，github.repository 可能带大写（例如 ELOATS/goapi）
+      - id: repo
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}/${{ matrix.cmd }}
+          images: ghcr.io/${{ steps.repo.outputs.name }}/${{ matrix.cmd }}
           tags: |
             type=ref,event=pr
             type=sha,format=short
