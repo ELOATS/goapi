@@ -76,9 +76,9 @@ func NewLagCollector(cons ConsumerInfoer, pool *pgxpool.Pool, consumerName strin
 }
 
 type lagCollector struct {
-	cons                                  ConsumerInfoer
-	pool                                  *pgxpool.Pool
-	name                                  string
+	cons                                   ConsumerInfoer
+	pool                                   *pgxpool.Pool
+	name                                   string
 	pending, ackPending, redelivered, dead *prometheus.Desc
 }
 

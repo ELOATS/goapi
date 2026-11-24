@@ -1,8 +1,10 @@
 // Command alertbridge 把 Alertmanager 的 webhook 转发到飞书 / 钉钉自定义机器人。
 //
 // Alertmanager 原生不支持飞书和钉钉，这个小服务只依赖标准库：
-//   POST /feishu    → 飞书群机器人（消息卡片）
-//   POST /dingtalk  → 钉钉群机器人（markdown）
+//
+//	POST /feishu    → 飞书群机器人（消息卡片）
+//	POST /dingtalk  → 钉钉群机器人（markdown）
+//
 // 对应的 *_WEBHOOK_URL 未设置时进入 dry-run：只把消息打印到日志，方便本地调试。
 package main
 

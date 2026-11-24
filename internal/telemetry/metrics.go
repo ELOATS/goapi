@@ -67,7 +67,7 @@ func (m *HTTPMetrics) End(method, route string, status int, d time.Duration) {
 type poolCollector struct {
 	pool *pgxpool.Pool
 
-	acquired, idle, total, max, constructing *prometheus.Desc
+	acquired, idle, total, max, constructing                 *prometheus.Desc
 	acquireCount, acquireWait, emptyAcquire, canceledAcquire *prometheus.Desc
 }
 
@@ -99,7 +99,9 @@ func (c *poolCollector) Describe(ch chan<- *prometheus.Desc) {
 func (c *poolCollector) Collect(ch chan<- prometheus.Metric) {
 	s := c.pool.Stat()
 	g := func(d *prometheus.Desc, v float64) { ch <- prometheus.MustNewConstMetric(d, prometheus.GaugeValue, v) }
-	ct := func(d *prometheus.Desc, v float64) { ch <- prometheus.MustNewConstMetric(d, prometheus.CounterValue, v) }
+	ct := func(d *prometheus.Desc, v float64) {
+		ch <- prometheus.MustNewConstMetric(d, prometheus.CounterValue, v)
+	}
 
 	g(c.acquired, float64(s.AcquiredConns()))
 	g(c.idle, float64(s.IdleConns()))

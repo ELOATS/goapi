@@ -32,13 +32,13 @@ type Config struct {
 	ClientIPHeader string
 
 	// 数据库：DATABASE_URL 为空时使用内存存储（方便本地起步）。
-	DatabaseURL     string
-	DBMaxConns      int32
-	DBMinConns      int32
-	DBMaxConnLife   time.Duration
-	DBMaxConnIdle   time.Duration
-	DBQueryTimeout  time.Duration // 单条 SQL 的最长执行时间
-	MigrateOnStart  bool          // 多副本部署建议改为 false，用单独的 Job 跑迁移
+	DatabaseURL    string
+	DBMaxConns     int32
+	DBMinConns     int32
+	DBMaxConnLife  time.Duration
+	DBMaxConnIdle  time.Duration
+	DBQueryTimeout time.Duration // 单条 SQL 的最长执行时间
+	MigrateOnStart bool          // 多副本部署建议改为 false，用单独的 Job 跑迁移
 
 	// 可观测性
 	ServiceName      string  // OTEL_SERVICE_NAME
@@ -49,21 +49,21 @@ type Config struct {
 	DocsEnabled      bool // 提供 /api/openapi.yaml 和 /api/docs（Swagger UI）
 
 	// 认证
-	OIDCIssuerURL  string
-	OIDCAudience   string
-	OIDCRolesClaim string
+	OIDCIssuerURL    string
+	OIDCAudience     string
+	OIDCRolesClaim   string
 	OIDCDiscoveryURL string // 可选，见 auth.OIDCConfig.DiscoveryURL
-	AuthDisabled   bool // 仅本地开发；APP_ENV=prod 时禁止
+	AuthDisabled     bool   // 仅本地开发；APP_ENV=prod 时禁止
 
 	// 限流
-	RateLimitEnabled   bool
-	RateLimitIPRate    float64
-	RateLimitIPBurst   int
-	RateLimitUserRate  float64
-	RateLimitUserBurst int
+	RateLimitEnabled    bool
+	RateLimitIPRate     float64
+	RateLimitIPBurst    int
+	RateLimitUserRate   float64
+	RateLimitUserBurst  int
 	RateLimitWriteRate  float64 // 写接口单独的额度，按用户计数
 	RateLimitWriteBurst int
-	RedisURL           string // 为空则每个实例单独计数
+	RedisURL            string // 为空则每个实例单独计数
 
 	// 分页游标的签名密钥（至少 32 字节，所有副本共用）。为空时本地随机生成，生产环境必须配置
 	CursorKey          []byte
@@ -73,45 +73,45 @@ type Config struct {
 func Load() (Config, error) {
 	var errs []error
 	c := Config{
-		Env:                str("APP_ENV", "dev"),
-		HTTPAddr:           str("HTTP_ADDR", ":8080"),
-		ReadHeaderTimeout:  dur("HTTP_READ_HEADER_TIMEOUT", 5*time.Second, &errs),
-		ReadTimeout:        dur("HTTP_READ_TIMEOUT", 15*time.Second, &errs),
-		WriteTimeout:       dur("HTTP_WRITE_TIMEOUT", 30*time.Second, &errs),
-		IdleTimeout:        dur("HTTP_IDLE_TIMEOUT", 120*time.Second, &errs),
-		HandlerTimeout:     dur("HTTP_HANDLER_TIMEOUT", 20*time.Second, &errs),
-		ShutdownDrainDelay: dur("SHUTDOWN_DRAIN_DELAY", 5*time.Second, &errs),
-		ShutdownTimeout:    dur("SHUTDOWN_TIMEOUT", 25*time.Second, &errs),
-		MaxBodyBytes:       int64(num("HTTP_MAX_BODY_BYTES", 1<<20, &errs)),
-		TrustProxy:         boolean("HTTP_TRUST_PROXY", false, &errs),
-		ClientIPHeader:     str("HTTP_CLIENT_IP_HEADER", "X-Real-IP"),
-		DatabaseURL:        str("DATABASE_URL", ""),
-		DBMaxConns:         num32("DB_MAX_CONNS", 10, &errs),
-		DBMinConns:         num32("DB_MIN_CONNS", 2, &errs),
-		DBMaxConnLife:      dur("DB_MAX_CONN_LIFETIME", 30*time.Minute, &errs),
-		DBMaxConnIdle:      dur("DB_MAX_CONN_IDLE", 5*time.Minute, &errs),
-		DBQueryTimeout:     dur("DB_QUERY_TIMEOUT", 5*time.Second, &errs),
-		MigrateOnStart:     boolean("DB_MIGRATE_ON_START", true, &errs),
-		ServiceName:        str("OTEL_SERVICE_NAME", "goapi"),
-		TracingEnabled:     str("OTEL_EXPORTER_OTLP_ENDPOINT", "") != "" || str("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "") != "",
-		TraceSampleRatio:   float("TRACE_SAMPLE_RATIO", 1.0, &errs),
-		MetricsAddr:        str("METRICS_ADDR", ":9090"),
-		PprofEnabled:       boolean("PPROF_ENABLED", false, &errs),
-		DocsEnabled:        boolean("DOCS_ENABLED", true, &errs),
-		OIDCIssuerURL:      str("OIDC_ISSUER_URL", ""),
-		OIDCAudience:       str("OIDC_AUDIENCE", ""),
-		OIDCRolesClaim:     str("OIDC_ROLES_CLAIM", "roles"),
-		OIDCDiscoveryURL:   str("OIDC_DISCOVERY_URL", ""),
-		AuthDisabled:       boolean("AUTH_DISABLED", false, &errs),
-		RateLimitEnabled:   boolean("RATE_LIMIT_ENABLED", true, &errs),
-		RateLimitIPRate:    float("RATE_LIMIT_IP_RPS", 20, &errs),
-		RateLimitIPBurst:   num("RATE_LIMIT_IP_BURST", 40, &errs),
-		RateLimitUserRate:  float("RATE_LIMIT_USER_RPS", 10, &errs),
-		RateLimitUserBurst: num("RATE_LIMIT_USER_BURST", 20, &errs),
+		Env:                 str("APP_ENV", "dev"),
+		HTTPAddr:            str("HTTP_ADDR", ":8080"),
+		ReadHeaderTimeout:   dur("HTTP_READ_HEADER_TIMEOUT", 5*time.Second, &errs),
+		ReadTimeout:         dur("HTTP_READ_TIMEOUT", 15*time.Second, &errs),
+		WriteTimeout:        dur("HTTP_WRITE_TIMEOUT", 30*time.Second, &errs),
+		IdleTimeout:         dur("HTTP_IDLE_TIMEOUT", 120*time.Second, &errs),
+		HandlerTimeout:      dur("HTTP_HANDLER_TIMEOUT", 20*time.Second, &errs),
+		ShutdownDrainDelay:  dur("SHUTDOWN_DRAIN_DELAY", 5*time.Second, &errs),
+		ShutdownTimeout:     dur("SHUTDOWN_TIMEOUT", 25*time.Second, &errs),
+		MaxBodyBytes:        int64(num("HTTP_MAX_BODY_BYTES", 1<<20, &errs)),
+		TrustProxy:          boolean("HTTP_TRUST_PROXY", false, &errs),
+		ClientIPHeader:      str("HTTP_CLIENT_IP_HEADER", "X-Real-IP"),
+		DatabaseURL:         str("DATABASE_URL", ""),
+		DBMaxConns:          num32("DB_MAX_CONNS", 10, &errs),
+		DBMinConns:          num32("DB_MIN_CONNS", 2, &errs),
+		DBMaxConnLife:       dur("DB_MAX_CONN_LIFETIME", 30*time.Minute, &errs),
+		DBMaxConnIdle:       dur("DB_MAX_CONN_IDLE", 5*time.Minute, &errs),
+		DBQueryTimeout:      dur("DB_QUERY_TIMEOUT", 5*time.Second, &errs),
+		MigrateOnStart:      boolean("DB_MIGRATE_ON_START", true, &errs),
+		ServiceName:         str("OTEL_SERVICE_NAME", "goapi"),
+		TracingEnabled:      str("OTEL_EXPORTER_OTLP_ENDPOINT", "") != "" || str("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "") != "",
+		TraceSampleRatio:    float("TRACE_SAMPLE_RATIO", 1.0, &errs),
+		MetricsAddr:         str("METRICS_ADDR", ":9090"),
+		PprofEnabled:        boolean("PPROF_ENABLED", false, &errs),
+		DocsEnabled:         boolean("DOCS_ENABLED", true, &errs),
+		OIDCIssuerURL:       str("OIDC_ISSUER_URL", ""),
+		OIDCAudience:        str("OIDC_AUDIENCE", ""),
+		OIDCRolesClaim:      str("OIDC_ROLES_CLAIM", "roles"),
+		OIDCDiscoveryURL:    str("OIDC_DISCOVERY_URL", ""),
+		AuthDisabled:        boolean("AUTH_DISABLED", false, &errs),
+		RateLimitEnabled:    boolean("RATE_LIMIT_ENABLED", true, &errs),
+		RateLimitIPRate:     float("RATE_LIMIT_IP_RPS", 20, &errs),
+		RateLimitIPBurst:    num("RATE_LIMIT_IP_BURST", 40, &errs),
+		RateLimitUserRate:   float("RATE_LIMIT_USER_RPS", 10, &errs),
+		RateLimitUserBurst:  num("RATE_LIMIT_USER_BURST", 20, &errs),
 		RateLimitWriteRate:  float("RATE_LIMIT_WRITE_RPS", 2, &errs),
 		RateLimitWriteBurst: num("RATE_LIMIT_WRITE_BURST", 10, &errs),
 		CursorKey:           []byte(str("CURSOR_SECRET", "")),
-		RedisURL:           str("REDIS_URL", ""),
+		RedisURL:            str("REDIS_URL", ""),
 	}
 	if c.RateLimitEnabled {
 		if c.RateLimitIPRate <= 0 || c.RateLimitUserRate <= 0 || c.RateLimitWriteRate <= 0 {

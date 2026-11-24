@@ -13,7 +13,9 @@ import (
 )
 
 // 集成测试：设置 TEST_DATABASE_URL 才会运行，例如
-//   TEST_DATABASE_URL=postgres://app:app@localhost:15432/app_test?sslmode=disable go test ./internal/store/
+//
+//	TEST_DATABASE_URL=postgres://app:app@localhost:15432/app_test?sslmode=disable go test ./internal/store/
+//
 // 注意：会清空 users 和 outbox_events 表，不要指向生产库。
 func newTestPG(t *testing.T) (*pgxpool.Pool, *PostgresUserStore) {
 	t.Helper()

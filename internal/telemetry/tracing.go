@@ -24,8 +24,10 @@ type TracingConfig struct {
 // SetupTracing 安装全局 TracerProvider 和 W3C 传播器，返回的函数用于退出时刷新剩余 span。
 //
 // 导出器的地址、协议头、TLS 等全部由标准环境变量控制，例如
-//   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-//   OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer xxx
+//
+//	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+//	OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer xxx
+//
 // 未开启时仍会安装传播器：上游传来的 traceparent 会被透传到日志和下游。
 func SetupTracing(ctx context.Context, c TracingConfig) (func(context.Context) error, error) {
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(

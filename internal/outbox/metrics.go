@@ -57,7 +57,7 @@ func (m *Metrics) observeFailure(kind string) {
 // backlogCollector 在抓取时查一次数据库。多个 relay 副本会报出相同的值，告警和面板里用 max()。
 // 查询失败时不输出这几个指标（而不是让整个 /metrics 失败），以免数据库故障时误报 relay 宕机。
 type backlogCollector struct {
-	pool                *pgxpool.Pool
+	pool                  *pgxpool.Pool
 	pending, oldest, dead *prometheus.Desc
 }
 
