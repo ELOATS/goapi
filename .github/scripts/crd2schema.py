@@ -12,11 +12,20 @@ import sys
 import yaml
 
 
+class CRDLoader(yaml.SafeLoader):
+    """PyYAML 按 YAML 1.1 解析：值为单独一个 "=" 的普通标量会被识别成 tag:yaml.org,2002:value，
+    而 SafeLoader 没有对应的构造器，直接报错（Prometheus Operator 的 CRD 里 relabel 的枚举值就有 "="）。
+    YAML 1.2 和 Kubernetes 都把它当成普通字符串，这里也按字符串处理。"""
+
+
+CRDLoader.add_constructor("tag:yaml.org,2002:value", lambda loader, node: loader.construct_scalar(node))
+
+
 def main(src: str, out: str) -> None:
     count = 0
     for name in sorted(os.listdir(src)):
         with open(os.path.join(src, name), encoding="utf-8") as f:
-            for doc in yaml.safe_load_all(f):
+            for doc in yaml.load_all(f, Loader=CRDLoader):  # noqa: S506 — CRDLoader 继承自 SafeLoader
                 if not doc or doc.get("kind") != "CustomResourceDefinition":
                     continue
                 spec = doc["spec"]
