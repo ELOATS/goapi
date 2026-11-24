@@ -38,8 +38,9 @@ jobs:
       # 这里取 go.mod 的主次版本，装这个系列的最新补丁版本（和 Dockerfile 用的 golang:1.26 镜像一致）
       - id: gover
         run: |
-          # 兼容 CRLF 换行、UTF-8 BOM 和行首空白；取不到版本时直接报错，不把空版本交给 setup-go
-          v=$(sed -e '1s/^\xEF\xBB\xBF//' -e 's/\r$//' go.mod | awk '\$1 == "go" { split(\$2, a, "."); print a[1] "." a[2]; exit }')
+          # 只取 go.mod 里 go 指令的主次版本（1.26）。兼容 BOM、CRLF、行首空白；取不到时直接报错。
+          # 这里刻意不用 awk 的字段变量（美元符号加数字）：从网页或聊天里复制时它容易被加上反斜杠
+          v=$(tr -d '\r' < go.mod | sed -e '1s/^\xEF\xBB\xBF//' | sed -n -E 's/^[[:space:]]*go[[:space:]]+([0-9]+)\.([0-9]+).*/\1.\2/p' | head -n 1)
           if ! echo "$v" | grep -Eq '^[0-9]+\.[0-9]+$'; then
             echo "::error file=go.mod::没有从 go.mod 读到 go 版本（读到的是 '$v'）。go.mod 前几行（cat -A 显示不可见字符）："
             head -n 5 go.mod | cat -A
@@ -60,7 +61,7 @@ jobs:
 
       - name: Dockerfile 的 Go 版本和 go.mod 一致
         run: |
-          mod=$(sed -e '1s/^\xEF\xBB\xBF//' -e 's/\r$//' go.mod | awk '\$1 == "go" { split(\$2, a, "."); print a[1] "." a[2]; exit }')
+          mod=$(tr -d '\r' < go.mod | sed -e '1s/^\xEF\xBB\xBF//' | sed -n -E 's/^[[:space:]]*go[[:space:]]+([0-9]+)\.([0-9]+).*/\1.\2/p' | head -n 1)
           img=$(sed -n 's/^ARG GO_VERSION=//p' Dockerfile | tr -d '\r[:space:]')
           if [ "$mod" != "$img" ]; then
             echo "::error file=Dockerfile::GO_VERSION=$img，但 go.mod 要求 go $mod，镜像构建会失败。请把 Dockerfile 的 GO_VERSION 改成 $mod"
@@ -95,7 +96,7 @@ jobs:
         image: postgres:17
         env:
           POSTGRES_USER: app
-          POSTGRES_PASSWORD: app
+          POSTGRES_HOST_AUTH_METHOD: trust   # CI 里的一次性数据库，不设密码
           POSTGRES_DB: app
         ports:
           - 5432:5432
@@ -119,7 +120,7 @@ jobs:
       TEST_NATS_URL: nats://localhost:4222
       TEST_REDIS_URL: redis://localhost:6379/15
       # 设置后会运行 internal/store 的 Postgres 集成测试
-      TEST_DATABASE_URL: postgres://app:app@localhost:5432/app?sslmode=disable
+      TEST_DATABASE_URL: "host=localhost port=5432 user=app dbname=app sslmode=disable"   # pgx 支持 key=value 形式
     steps:
       - uses: actions/checkout@v6
       # 不直接用 go-version-file：go mod tidy 会把 go.mod 写成 "go 1.26.0" 这种精确版本，
@@ -127,8 +128,9 @@ jobs:
       # 这里取 go.mod 的主次版本，装这个系列的最新补丁版本（和 Dockerfile 用的 golang:1.26 镜像一致）
       - id: gover
         run: |
-          # 兼容 CRLF 换行、UTF-8 BOM 和行首空白；取不到版本时直接报错，不把空版本交给 setup-go
-          v=$(sed -e '1s/^\xEF\xBB\xBF//' -e 's/\r$//' go.mod | awk '\$1 == "go" { split(\$2, a, "."); print a[1] "." a[2]; exit }')
+          # 只取 go.mod 里 go 指令的主次版本（1.26）。兼容 BOM、CRLF、行首空白；取不到时直接报错。
+          # 这里刻意不用 awk 的字段变量（美元符号加数字）：从网页或聊天里复制时它容易被加上反斜杠
+          v=$(tr -d '\r' < go.mod | sed -e '1s/^\xEF\xBB\xBF//' | sed -n -E 's/^[[:space:]]*go[[:space:]]+([0-9]+)\.([0-9]+).*/\1.\2/p' | head -n 1)
           if ! echo "$v" | grep -Eq '^[0-9]+\.[0-9]+$'; then
             echo "::error file=go.mod::没有从 go.mod 读到 go 版本（读到的是 '$v'）。go.mod 前几行（cat -A 显示不可见字符）："
             head -n 5 go.mod | cat -A
@@ -153,7 +155,7 @@ jobs:
 
       - name: 覆盖率摘要
         run: |
-          total=$(go tool cover -func=coverage.out | awk '/^total:/ {print \$3}')
+          total=$(go tool cover -func=coverage.out | grep '^total:' | tr -s ' \t' ' ' | cut -d' ' -f3)
           echo "### 测试覆盖率：${total}" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v5
@@ -173,8 +175,9 @@ jobs:
       # 这里取 go.mod 的主次版本，装这个系列的最新补丁版本（和 Dockerfile 用的 golang:1.26 镜像一致）
       - id: gover
         run: |
-          # 兼容 CRLF 换行、UTF-8 BOM 和行首空白；取不到版本时直接报错，不把空版本交给 setup-go
-          v=$(sed -e '1s/^\xEF\xBB\xBF//' -e 's/\r$//' go.mod | awk '\$1 == "go" { split(\$2, a, "."); print a[1] "." a[2]; exit }')
+          # 只取 go.mod 里 go 指令的主次版本（1.26）。兼容 BOM、CRLF、行首空白；取不到时直接报错。
+          # 这里刻意不用 awk 的字段变量（美元符号加数字）：从网页或聊天里复制时它容易被加上反斜杠
+          v=$(tr -d '\r' < go.mod | sed -e '1s/^\xEF\xBB\xBF//' | sed -n -E 's/^[[:space:]]*go[[:space:]]+([0-9]+)\.([0-9]+).*/\1.\2/p' | head -n 1)
           if ! echo "$v" | grep -Eq '^[0-9]+\.[0-9]+$'; then
             echo "::error file=go.mod::没有从 go.mod 读到 go 版本（读到的是 '$v'）。go.mod 前几行（cat -A 显示不可见字符）："
             head -n 5 go.mod | cat -A
@@ -324,12 +327,11 @@ jobs:
             type=semver,pattern={{version}}
 
       # PR 只构建不推送；main 分支和 v* 标签才推送
-      - if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 登录 GHCR
+        if: github.event_name != 'pull_request'
+        env:
+          REGISTRY_CRED: ${{ github.token }}
+        run: echo "$REGISTRY_CRED" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
       - uses: docker/build-push-action@v6
         with:
