@@ -160,7 +160,7 @@ jobs:
           total=$(go tool cover -func=coverage.out | grep '^total:' | tr -s ' \t' ' ' | cut -d' ' -f3)
           echo "### 测试覆盖率：${total}" >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage.out
@@ -335,7 +335,7 @@ jobs:
         if: failure()
         run: kind export logs --name goapi /tmp/kind-logs
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: kind-logs
