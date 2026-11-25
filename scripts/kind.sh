@@ -46,13 +46,45 @@ h() { helm --kube-context "$CTX" "$@"; }
 cluster_exists() { kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; }
 assert_cluster() { cluster_exists || die "kind 集群 $CLUSTER 不存在，先运行 scripts/kind.sh up"; }
 
+PF_PID=""
+TMPD=$(mktemp -d)
+cleanup() {
+  [[ -n "$PF_PID" ]] && kill "$PF_PID" >/dev/null 2>&1 || true
+  rm -rf "$TMPD"
+}
+trap cleanup EXIT
+
 # ---------------------------------------------------------------- up
+# 把宿主机上的镜像导入 kind 节点。
+# Docker 用 containerd 镜像存储时（GitHub runner 和新版 Docker Desktop 的默认设置），
+# 多架构镜像在本地只有当前架构的层，但 kind load docker-image 会按 --all-platforms 导入整个清单，
+# 报 "ctr: content digest sha256:...: not found"。这时改成只导出当前架构再导入。
+# 用法：load_image <镜像> <required|optional>。optional 导入失败只警告：节点会自己去拉
+NODE_ARCH=""
+load_image() {
+  local a=("$@")
+  local img="${a[0]}" mode="${a[1]}" tar
+  kind load docker-image --name "$CLUSTER" "$img" && return 0
+  [[ -n "$NODE_ARCH" ]] || NODE_ARCH=$(docker version --format '{{.Server.Arch}}')
+  echo "kind load docker-image 失败，改为只导出 linux/${NODE_ARCH} 再导入：$img"
+  tar="$TMPD/image.tar"
+  if docker save --platform "linux/${NODE_ARCH}" -o "$tar" "$img" && kind load image-archive --name "$CLUSTER" "$tar"; then
+    rm -f "$tar"; return 0
+  fi
+  rm -f "$tar"
+  if [[ "$mode" == "optional" ]]; then
+    echo "::warning::没能把 $img 导入集群，节点会在部署时自己拉取"
+    return 0
+  fi
+  die "没能把 $img 导入集群"
+}
+
 preload_images() {
   local img
   for img in "$@"; do
     echo "== 导入镜像 $img"
     docker image inspect "$img" >/dev/null 2>&1 || docker pull "$img"
-    kind load docker-image --name "$CLUSTER" "$img"
+    load_image "$img" optional
   done
 }
 
@@ -99,13 +131,13 @@ do_up() {
 # ---------------------------------------------------------------- build
 do_build() {
   assert_cluster
-  local c tags=()
+  local c
   for c in "${IMAGES[@]}"; do
     echo; echo "== 构建 goapi/${c}:kind"
-    docker build -t "goapi/${c}:kind" --build-arg "CMD=${c}" .
-    tags+=("goapi/${c}:kind")
+    # 不生成 provenance / SBOM 证明：它们会让本地镜像变成多清单的索引，kind 导入时更容易出 digest not found
+    docker build --provenance=false --sbom=false -t "goapi/${c}:kind" --build-arg "CMD=${c}" .
   done
-  kind load docker-image --name "$CLUSTER" "${tags[@]}"
+  for c in "${IMAGES[@]}"; do load_image "goapi/${c}:kind" required; done
 }
 
 # ---------------------------------------------------------------- deploy
@@ -184,13 +216,6 @@ do_deploy() {
 }
 
 # ---------------------------------------------------------------- check 辅助
-PF_PID=""
-TMPD=$(mktemp -d)
-cleanup() {
-  [[ -n "$PF_PID" ]] && kill "$PF_PID" >/dev/null 2>&1 || true
-  rm -rf "$TMPD"
-}
-trap cleanup EXIT
 
 # 通过网关发请求，输出 "状态码 跳转地址"。用法：gw <http|https> <路径> [额外的 curl 参数...]
 gw() {
