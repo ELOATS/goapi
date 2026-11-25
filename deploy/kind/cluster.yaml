@@ -1,10 +1,21 @@
 # 本地验证用的 kind 集群：1 个控制面节点 + 2 个工作节点。
 # 两个工作节点用来验证：api 副本分散到不同节点（topologySpreadConstraints）、驱逐节点时 PDB 是否生效。
 # 由 scripts/kind.ps1 up 使用。
+#
+# 每个节点都要有 topology.kubernetes.io/zone 标签，模拟云上的可用区。
+# api 的 topologySpreadConstraints 同时按 zone 和 hostname 分散：调度器打分时，
+# 只要节点缺少其中任何一个 topologyKey 标签，这个 Pod 的所有分散约束在该节点上都不参与打分。
+# kind 默认没有 zone 标签，结果按 hostname 分散也完全失效，副本经常挤在同一个节点上。
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: goapi
 nodes:
   - role: control-plane
+    labels:
+      topology.kubernetes.io/zone: kind-a
   - role: worker
+    labels:
+      topology.kubernetes.io/zone: kind-a
   - role: worker
+    labels:
+      topology.kubernetes.io/zone: kind-b

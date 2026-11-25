@@ -532,6 +532,18 @@ Docker Desktop 建议至少分配 4 CPU、8 GB 内存（Settings → Resources�
 
 额外选一个 Envoy 不在的工作节点执行 `kubectl drain`，持续请求的同时等所有 Deployment 恢复，然后 `uncordon`。**预期**：所有请求都是 `200`，api 的 PDB（`maxUnavailable: 1`）让驱逐一个一个进行。
 
+### 12.4.1 Linux / macOS 和 CI
+
+`scripts/kind.sh` 和 `kind.ps1` 做的事情一样，检查项一一对应（改一个时同步另一个）：
+
+```bash
+bash scripts/kind.sh all --disruption   # up + build + deploy + check
+bash scripts/kind.sh diag               # 失败时打印节点、Pod、事件、日志
+bash scripts/kind.sh down
+```
+
+CI 的 `kind 端到端` job 每个 PR 和 main 的每次推送都会跑一遍 `check --disruption`，结果表写在任务摘要里；失败时会上传 `kind-logs` 制品。镜像推送（Docker job）要等它通过。
+
 ### 12.5 手动访问
 
 ```powershell

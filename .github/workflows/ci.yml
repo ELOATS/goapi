@@ -23,6 +23,8 @@ env:
   KUBECONFORM_IMAGE: ghcr.io/yannh/kubeconform:latest
   # 用来生成 ClientTrafficPolicy 等资源的 schema，和集群里装的 Envoy Gateway 保持一致
   ENVOY_GATEWAY_VERSION: v1.9.0
+  # kind 端到端用的 kind 版本，和本地保持一致（kind 版本决定了默认的 Kubernetes 节点镜像）
+  KIND_VERSION: v0.33.0
   OASDIFF_IMAGE: tufin/oasdiff:latest   # 建议固定版本
   K6_IMAGE: grafana/k6:latest           # 建议固定版本
 
@@ -295,9 +297,55 @@ jobs:
           docker run --rm -v /tmp:/base:ro -v "$PWD/api:/rev:ro" "$OASDIFF_IMAGE" \
             breaking /base/base-openapi.yaml /rev/openapi.yaml --fail-on ERR
 
+  # 在 kind 集群里部署整套服务，跑 scripts/kind.sh 的全部检查（和本地 scripts/kind.ps1 check -Disruption 一样）。
+  # 能拦住单看 YAML 发现不了的问题：overlay 镜像没生效、网关拿不到地址、滚动更新丢请求、副本挤在一个节点、NetworkPolicy 没生效等
+  kind-e2e:
+    name: kind 端到端
+    needs: [lint, test, configs]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: 安装 kind（kubectl、helm 是 runner 自带的）
+        run: |
+          curl -fsSLo /tmp/kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          sudo install -m 0755 /tmp/kind /usr/local/bin/kind
+          kind version
+          kubectl version --client
+          helm version --short
+
+      - name: 创建集群并安装组件
+        run: bash scripts/kind.sh up
+
+      - name: 构建镜像并导入集群
+        run: bash scripts/kind.sh build
+
+      - name: 部署
+        run: bash scripts/kind.sh deploy
+
+      - name: 检查（含节点驱逐）
+        run: bash scripts/kind.sh check --disruption
+
+      - name: 诊断信息
+        if: failure()
+        run: bash scripts/kind.sh diag
+
+      - name: 导出 kind 日志
+        if: failure()
+        run: kind export logs --name goapi /tmp/kind-logs
+
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: kind-logs
+          path: /tmp/kind-logs
+          retention-days: 7
+
   docker:
     name: Docker (${{ matrix.cmd }})
-    needs: [lint, test, vuln, configs]
+    # kind 端到端通过之后才推送镜像：CD 只会部署验证过的版本
+    needs: [lint, test, vuln, configs, kind-e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

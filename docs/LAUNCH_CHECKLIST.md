@@ -55,6 +55,7 @@
 | 配置 | 默认值 | 位置 |
 | --- | --- | --- |
 | GatewayClass | `eg`（Envoy Gateway 快速安装的默认名） | `overlays/*/gateway.yaml` |
+| 节点的可用区标签 | 每个节点都要有 `topology.kubernetes.io/zone`（云上托管集群自动带）。自建集群没有这个标签时，api 按 zone 和 hostname 的分散约束会全部失效，副本可能都在一个节点上；补上标签，或删掉 zone 那条约束。检查：`kubectl get nodes -L topology.kubernetes.io/zone` | `deploy/k8s/base/api-deployment.yaml` |
 | Envoy 代理所在命名空间 | `envoy-gateway-system`（API 的 NetworkPolicy 只放行这里） | `deploy/k8s/base/api-networkpolicy.yaml` |
 | cert-manager issuer | `letsencrypt-prod` | `overlays/*/gateway.yaml` |
 | 监控所在的命名空间 | `monitoring`（NetworkPolicy 只放行这个命名空间） | `deploy/k8s/base/` 下 4 个 NetworkPolicy |

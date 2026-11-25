@@ -1,7 +1,30 @@
 # Envoy Gateway 的 Helm chart 不会创建 GatewayClass，overlay 里的 Gateway 用的是 gatewayClassName: eg
+#
+# kind 里没有负载均衡器。Envoy Gateway 默认给每个 Gateway 建一个 LoadBalancer 类型的 Service，
+# 在 kind 里它的 EXTERNAL-IP 永远是 <pending>，Gateway 就一直拿不到地址，
+# Programmed 条件停在 False（AddressNotAssigned）。
+# 我们本来就用 kubectl port-forward 访问网关，所以把 Service 改成 ClusterIP：
+# 地址立刻分配，Gateway 能正常变成 Programmed。staging / production 有云负载均衡，不用这个设置。
 apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
 metadata:
   name: eg
 spec:
   controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: kind
+    namespace: envoy-gateway-system
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: kind
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: ClusterIP

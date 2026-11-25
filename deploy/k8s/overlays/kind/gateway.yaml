@@ -95,3 +95,29 @@ spec:
   # clientIPDetection:
   #   xForwardedFor:
   #     numTrustedHops: 1
+---
+# Envoy Gateway 扩展：Envoy 到后端 Pod 的连接设置
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: goapi
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: goapi
+  # 集群内建连通常在毫秒级。默认 10s 太长：Pod 刚被删、Envoy 的端点列表还没更新时，
+  # 发往旧 IP 的请求会一直卡到连接超时，客户端先超时断开
+  timeout:
+    tcp:
+      connectTimeout: 1s
+  # 只在"请求还没发到后端"时重试，对 POST 也安全（应用一定没收到这个请求）：
+  #   connect-failure：连不上（Pod 已退出、端点过期）
+  #   refused-stream：后端在处理前拒绝了这个 HTTP/2 流
+  # 不加 reset / 5xx：那时请求可能已经被处理，重试 POST 会重复创建
+  retry:
+    numRetries: 2
+    retryOn:
+      triggers:
+        - connect-failure
+        - refused-stream

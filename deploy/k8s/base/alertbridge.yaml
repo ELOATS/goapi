@@ -37,6 +37,10 @@ spec:
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: goapi-alertbridge
+          # 只统计同一版本（ReplicaSet）的 Pod。不加的话，滚动更新时旧 Pod 也算在内，
+          # 新 Pod 会按"旧 Pod 还在"时的分布去排，旧的一删，新的往往全挤在一个节点上
+          matchLabelKeys:
+            - pod-template-hash
       containers:
         - name: alertbridge
           image: goapi-alertbridge

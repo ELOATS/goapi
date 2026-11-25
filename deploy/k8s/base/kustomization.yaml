@@ -41,17 +41,7 @@ secretGenerator:
   - name: alertbridge-secrets
     envs: [alertbridge-secrets.env]
 
-# 基础镜像名占位，在 overlay 里替换成真实仓库和标签
-images:
-  - name: goapi-api
-    newName: ghcr.io/your-org/goapi/api
-    newTag: latest
-  - name: goapi-alertbridge
-    newName: ghcr.io/your-org/goapi/alertbridge
-    newTag: latest
-  - name: goapi-relay
-    newName: ghcr.io/your-org/goapi/relay
-    newTag: latest
-  - name: goapi-consumer
-    newName: ghcr.io/your-org/goapi/consumer
-    newTag: latest
+# 镜像在各 overlay 里设置，base 不写 images。
+# Deployment / Job 里的 image 是占位名 goapi-api 等，overlay 的 images 按这个名字匹配。
+# 如果 base 里先把它改成了 ghcr.io/...，overlay 就再也匹配不到，
+# 写在 overlay 里的仓库和标签（kind 的 goapi/api:kind、production 的 v0.1.0、CD 的 kustomize edit set image）都会被静默忽略。c
