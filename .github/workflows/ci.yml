@@ -49,7 +49,7 @@ jobs:
             exit 1
           fi
           echo "go=$v.x" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ steps.gover.outputs.go }}
           check-latest: true
@@ -139,7 +139,7 @@ jobs:
             exit 1
           fi
           echo "go=$v.x" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ steps.gover.outputs.go }}
           check-latest: true
@@ -186,7 +186,7 @@ jobs:
             exit 1
           fi
           echo "go=$v.x" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ steps.gover.outputs.go }}
           check-latest: true
